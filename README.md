@@ -94,9 +94,42 @@ cd dashboard && npm install && cd ..
 
 ```bash
 cp .env.example .env
-# Edit .env and set:
-#   ANTHROPIC_API_KEY=your_key_here
-#   AC_ROOT=C:\...\steamapps\common\assettocorsa   # optional, for synthetic laps
+```
+
+Then edit `.env` — here's what each variable does:
+
+```bash
+# ── Required ──────────────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY=your_key_here
+
+# ── Model selection ───────────────────────────────────────────────────────────
+# Sonnet for reasoning/language agents (coaching_writer, data_gatherer, synthetic_lap)
+CLAUDE_MODEL=claude-sonnet-4-6
+
+# Haiku for calculation-only agents (corner_analysis, braking_efficiency, balance_diagnosis)
+# These agents produce structured JSON — Haiku is faster and ~20× cheaper here.
+CLAUDE_MODEL_FAST=claude-haiku-4-5
+
+# ── Assetto Corsa installation ─────────────────────────────────────────────────
+# Required for synthetic reference laps. Leave blank to skip that agent.
+# Example (Windows): C:\Program Files (x86)\Steam\steamapps\common\assettocorsa
+AC_ROOT=
+
+# ── Storage paths (defaults shown — only change if you need to) ────────────────
+PITWALL_DB_PATH=db/pitwall.db
+PITWALL_DATA_DIR=data/sessions
+
+# ── Telemetrick auto-discovery ─────────────────────────────────────────────────
+# Root folder of your Telemetrick exports. If set, run_session.py can find
+# sessions without you specifying the full file path.
+# Example: C:\Users\YourName\Documents\Assetto Corsa\apps\telemetrick\exported\YourDriver
+TELEMETRY_EXPORT_DIR=
+
+# ── Lap validity filter ────────────────────────────────────────────────────────
+# Laps outside this window are marked invalid when the 'Lap Invalidated'
+# channel is absent from the .ld file.
+PITWALL_VALID_LAP_MIN_MS=30000
+PITWALL_VALID_LAP_MAX_MS=120000
 ```
 
 ### Run
@@ -193,22 +226,20 @@ PitWall/
 │   └── coaching_writer.txt
 ├── scripts/
 │   ├── run_session.py           # CLI: ingest + analyse + export
+│   ├── watch_telemetry.py       # File watcher: auto-ingest on .ld drop
 │   └── set_reference_lap.py    # CLI: mark a lap as the reference
-├── dashboard/
-│   ├── public/
-│   │   └── mock_session.json    # Static demo data
-│   └── src/
-│       ├── App.jsx
-│       └── components/
-│           ├── SessionHeader.jsx
-│           ├── LapTimeBarChart.jsx
-│           ├── SpeedTraceChart.jsx
-│           ├── InputTraceChart.jsx
-│           ├── CornerSummaryTable.jsx
-│           └── CoachingPanel.jsx
-└── tests/
-    ├── test_ingest.py
-    └── test_export.py
+└── dashboard/
+    ├── public/
+    │   └── mock_session.json    # Static demo data
+    └── src/
+        ├── App.jsx
+        └── components/
+            ├── SessionHeader.jsx
+            ├── LapTimeBarChart.jsx
+            ├── SpeedTraceChart.jsx
+            ├── InputTraceChart.jsx
+            ├── CornerSummaryTable.jsx
+            └── CoachingPanel.jsx
 ```
 
 ---
@@ -217,9 +248,11 @@ PitWall/
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | — | Your Anthropic API key |
-| `CLAUDE_MODEL` | No | `claude-sonnet-4-6` | Model used for all agents |
-| `AC_ROOT` | No | — | Path to AC installation. Required for synthetic reference laps |
+| `ANTHROPIC_API_KEY` | **Yes** | — | Your Anthropic API key |
+| `CLAUDE_MODEL` | No | `claude-sonnet-4-6` | Model for reasoning/language agents (coaching writer, data gatherer, synthetic lap) |
+| `CLAUDE_MODEL_FAST` | No | `claude-haiku-4-5` | Model for calculation-only agents (corner analysis, braking, balance). Haiku is ~20× cheaper for structured JSON tasks |
+| `AC_ROOT` | No | — | Path to your AC installation. Required for synthetic reference laps |
+| `TELEMETRY_EXPORT_DIR` | No | — | Root of your Telemetrick export folder. Enables session auto-discovery |
 | `PITWALL_DB_PATH` | No | `db/pitwall.db` | SQLite database path |
 | `PITWALL_DATA_DIR` | No | `data/sessions` | Session files directory |
 | `PITWALL_VALID_LAP_MIN_MS` | No | `30000` | Minimum valid lap time (ms) |
