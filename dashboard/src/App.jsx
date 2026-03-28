@@ -15,8 +15,10 @@ const S = {
   importBar: { background: '#0f172a', borderBottom: '1px solid #1e293b', padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '12px' },
   importBtn: { background: '#1e40af', color: '#e2e8f0', border: 'none', borderRadius: '4px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px', fontFamily: 'monospace' },
   importStatus: { fontSize: '11px', color: '#64748b' },
-  // Main layout: single column, coaching panel full-width at the bottom
-  mainCol: { display: 'flex', flexDirection: 'column', gap: '1px', background: '#1e293b' },
+  // Main layout: charts (left) + coaching (right, wider)
+  grid:   { display: 'grid', gridTemplateColumns: '1fr 520px', gap: '1px', background: '#1e293b', minHeight: 'calc(100vh - 88px)' },
+  left:   { background: '#0a0a0f', display: 'flex', flexDirection: 'column', gap: '1px' },
+  right:  { background: '#0f172a', borderLeft: '1px solid #1e293b', position: 'sticky', top: 88, height: 'calc(100vh - 88px)', overflowY: 'auto' },
   // Top row inside left: lap bar chart + track map side by side
   topRow: { display: 'grid', gridTemplateColumns: '1fr 200px', gap: '1px', background: '#1e293b' },
   panel:  { background: '#0f172a', padding: '16px' },
@@ -159,36 +161,37 @@ export default function App() {
         onRefChange={setRefLapNum}
       />
 
-      <div style={S.mainCol}>
-        {/* Top row: lap bar chart + track map */}
-        <div style={S.topRow}>
+      <div style={S.grid}>
+        <div style={S.left}>
+          {/* Top row: lap bar chart + track map */}
+          <div style={S.topRow}>
+            <div style={S.panel}>
+              <LapTimeBarChart laps={data.laps} session={data.session} />
+            </div>
+            <div style={{ ...S.panel, padding: '16px' }}>
+              <TrackMap trackMapUrl={data.session.track_map_url} />
+            </div>
+          </div>
+
           <div style={S.panel}>
-            <LapTimeBarChart laps={data.laps} session={data.session} />
+            <SpeedTraceChart
+              speedTrace={activeTraces?.speed_trace || data.speed_trace}
+              cornerSummary={data.corner_summary}
+              trackLength={data.session.track_length_m}
+            />
           </div>
-          <div style={{ ...S.panel, padding: '16px' }}>
-            <TrackMap trackMapUrl={data.session.track_map_url} />
+          <div style={S.panel}>
+            <InputTraceChart
+              inputTrace={activeTraces?.input_trace || data.input_trace}
+              cornerSummary={data.corner_summary}
+            />
+          </div>
+          <div style={S.panel}>
+            <CornerSummaryTable cornerSummary={data.corner_summary} />
           </div>
         </div>
 
-        <div style={S.panel}>
-          <SpeedTraceChart
-            speedTrace={activeTraces?.speed_trace || data.speed_trace}
-            cornerSummary={data.corner_summary}
-            trackLength={data.session.track_length_m}
-          />
-        </div>
-        <div style={S.panel}>
-          <InputTraceChart
-            inputTrace={activeTraces?.input_trace || data.input_trace}
-            cornerSummary={data.corner_summary}
-          />
-        </div>
-        <div style={S.panel}>
-          <CornerSummaryTable cornerSummary={data.corner_summary} />
-        </div>
-
-        {/* Coaching panel — full width at the bottom for readability */}
-        <div style={{ ...S.panel, maxWidth: 960, width: '100%', alignSelf: 'center', boxSizing: 'border-box' }}>
+        <div style={S.right}>
           <CoachingPanel report={data.coaching_report} session={data.session} />
         </div>
       </div>

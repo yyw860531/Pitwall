@@ -8,7 +8,7 @@ function fmtMs(ms) {
 }
 
 const styles = {
-  panel: { padding: '0' },
+  panel: { padding: '20px' },
   label: {
     fontSize: '11px', color: '#64748b',
     textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
@@ -48,12 +48,7 @@ const styles = {
     borderTop: '1px solid #1e293b',
     margin: '20px 0',
   },
-  // Full report in two columns on wide screens
-  reportGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '24px',
-  },
+  reportGrid: {},
   markdown: {
     fontSize: '13px',
     lineHeight: '1.8',
@@ -75,7 +70,6 @@ const styles = {
     marginTop: '20px',
     fontSize: '13px',
     color: '#93c5fd',
-    gridColumn: '1 / -1',
   },
   nextLabel: {
     fontSize: '10px',
@@ -87,12 +81,6 @@ const styles = {
 }
 
 export default function CoachingPanel({ report, session }) {
-  // Split markdown into sections so we can lay them out in two columns
-  const sections = (report.full_markdown || '').split(/(?=^## )/m).filter(Boolean)
-  const mid = Math.ceil(sections.length / 2)
-  const col1 = sections.slice(0, mid).join('\n')
-  const col2 = sections.slice(mid).join('\n')
-
   return (
     <div style={styles.panel}>
       <div style={styles.label}>AI Race Engineer</div>
@@ -108,7 +96,7 @@ export default function CoachingPanel({ report, session }) {
         )}
       </div>
 
-      {/* Priority corner cards — horizontal row */}
+      {/* Priority corner cards */}
       <div style={styles.priorityRow}>
         {report.priority_corners?.map(corner => (
           <div key={corner.corner_name} style={styles.priorityCard(corner.rank)}>
@@ -125,21 +113,18 @@ export default function CoachingPanel({ report, session }) {
 
       <hr style={styles.divider} />
 
-      {/* Full coaching report — two columns */}
-      <div style={styles.reportGrid}>
-        <div style={styles.markdown}>
-          <ReactMarkdown>{col1}</ReactMarkdown>
-        </div>
-        <div style={styles.markdown}>
-          <ReactMarkdown>{col2}</ReactMarkdown>
-          {report.next_action && (
-            <div style={styles.nextAction}>
-              <div style={styles.nextLabel}>Next Session Focus</div>
-              <div>{report.next_action}</div>
-            </div>
-          )}
-        </div>
+      {/* Full coaching report */}
+      <div style={styles.markdown}>
+        <ReactMarkdown>{report.full_markdown}</ReactMarkdown>
       </div>
+
+      {/* Next action */}
+      {report.next_action && (
+        <div style={styles.nextAction}>
+          <div style={styles.nextLabel}>Next Session Focus</div>
+          <div>{report.next_action}</div>
+        </div>
+      )}
     </div>
   )
 }
