@@ -543,4 +543,21 @@ async def api_export(request) -> dict:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    mcp.run()
+    import argparse as _ap
+    _parser = _ap.ArgumentParser(description="PitWall MCP server")
+    _parser.add_argument("--http", action="store_true",
+                         help="Run as HTTP server (for dashboard API)")
+    _parser.add_argument("--port", type=int, default=8765,
+                         help="HTTP port (default: 8765)")
+    _args = _parser.parse_args()
+
+    if _args.http:
+        import asyncio as _asyncio
+        _asyncio.run(mcp.run_http_async(
+            transport="sse",
+            host="127.0.0.1",
+            port=_args.port,
+            show_banner=True,
+        ))
+    else:
+        mcp.run()
