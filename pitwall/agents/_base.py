@@ -28,11 +28,26 @@ def load_prompt(name: str) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def call_claude_json(system: str, user: str, max_tokens: int = 2048) -> dict:
+def call_claude_json(
+    system: str,
+    user: str,
+    max_tokens: int = 2048,
+    model: str | None = None,
+) -> dict:
     """
     Call Claude and parse the JSON response.
     Retries once with a stricter reminder if the response is not valid JSON.
+
+    model: override the default model. Pass config.claude_model_fast for
+           calculation-only agents (corner_analysis, braking, balance).
+           Defaults to config.claude_model (Sonnet) for reasoning/language agents.
     """
+    if not config.anthropic_api_key:
+        raise EnvironmentError(
+            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key."
+        )
+
+    active_model = model or config.claude_model
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
 
     for attempt in range(2):
@@ -40,7 +55,7 @@ def call_claude_json(system: str, user: str, max_tokens: int = 2048) -> dict:
             user = user + "\n\nIMPORTANT: Return ONLY valid JSON. No text before or after."
 
         response = client.messages.create(
-            model=config.claude_model,
+            model=active_model,
             system=system,
             messages=[{"role": "user", "content": user}],
             max_tokens=max_tokens,

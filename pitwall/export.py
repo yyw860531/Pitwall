@@ -30,6 +30,38 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 # Auto-replaced by get_ac_track_line() output when AC_ROOT is set.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Display name lookups — maps raw car_id / track_id from filename to
+# human-readable strings and known track lengths.
+# Falls back to the raw ID if not found (works for any new car/track).
+# ---------------------------------------------------------------------------
+
+CAR_DISPLAY: dict[str, str] = {
+    "abarth500":    "Abarth 500 EsseEsse",
+    "ks_abarth500": "Abarth 500 EsseEsse",
+}
+
+TRACK_DISPLAY: dict[str, str] = {
+    "ks_vallelungaclub_circuit":     "Vallelunga Club",
+    "ks_vallelungaextended_circuit": "Vallelunga Extended",
+    "ks_nordschleife":               "Nürburgring Nordschleife",
+    "ks_spa":                        "Spa-Francorchamps",
+    "ks_monza":                      "Monza",
+    "ks_silverstone":                "Silverstone",
+    "ks_mugello":                    "Mugello",
+}
+
+TRACK_LENGTH_M: dict[str, float] = {
+    "ks_vallelungaclub_circuit":     1720.17,
+    "ks_vallelungaextended_circuit": 3240.0,
+    "ks_nordschleife":               20832.0,
+    "ks_spa":                        7004.0,
+    "ks_monza":                      5793.0,
+    "ks_silverstone":                5891.0,
+    "ks_mugello":                    5245.0,
+}
+
+
 VALLELUNGA_CORNERS = [
     {"name": "T1_Curva_Grande",  "display": "T1 Curva Grande",  "start_m":  50,  "apex_m": 140,  "end_m": 220},
     {"name": "T2_Chicane_Entry", "display": "T2 Chicane Entry", "start_m": 320,  "apex_m": 375,  "end_m": 430},
@@ -527,10 +559,10 @@ def export(
                 "session_id":            session["session_id"],
                 "driver":                session["driver"],
                 "car_id":                session["car"],
-                "car_display":           "Abarth 500 EsseEsse",
+                "car_display":           CAR_DISPLAY.get(session["car"], session["car"]),
                 "track_id":              session["track"],
-                "track_display":         "Vallelunga Club",
-                "track_length_m":        1720.17,
+                "track_display":         TRACK_DISPLAY.get(session["track"], session["track"]),
+                "track_length_m":        TRACK_LENGTH_M.get(session["track"], 0.0),
                 "date":                  session["date"],
                 "best_lap_number":       best_lap["lap_number"],
                 "best_lap_time_ms":      best_lap["lap_time_ms"],

@@ -6,6 +6,7 @@ import json
 import logging
 
 from pitwall.agents._base import call_claude_json, load_prompt
+from config import config
 
 log = logging.getLogger(__name__)
 _SYSTEM = load_prompt("balance_diagnosis.txt")
@@ -28,7 +29,7 @@ def analyze(corner_payload: dict) -> dict | None:
     }, separators=(",", ":"))
 
     try:
-        result = call_claude_json(_SYSTEM, user, max_tokens=512)
+        result = call_claude_json(_SYSTEM, user, max_tokens=512, model=config.claude_model_fast)
         result.setdefault("corner_name", name)
         return result
     except Exception as e:

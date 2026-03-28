@@ -18,6 +18,7 @@ except ImportError:
 class PitWallConfig:
     anthropic_api_key: str
     claude_model: str
+    claude_model_fast: str
     db_path: Path
     data_dir: Path
     telemetry_export_dir: Path | None
@@ -34,11 +35,8 @@ class PitWallConfig:
 
 
 def load_config() -> PitWallConfig:
+    # API key is optional at import time — checked at point of use in _base.py
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise EnvironmentError(
-            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key."
-        )
 
     def _optional_path(key: str) -> Path | None:
         raw = os.environ.get(key, "").strip()
@@ -47,6 +45,7 @@ def load_config() -> PitWallConfig:
     return PitWallConfig(
         anthropic_api_key=api_key,
         claude_model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6"),
+        claude_model_fast=os.environ.get("CLAUDE_MODEL_FAST", "claude-haiku-4-5"),
         db_path=Path(os.environ.get("PITWALL_DB_PATH", "db/pitwall.db")),
         data_dir=Path(os.environ.get("PITWALL_DATA_DIR", "data/sessions")),
         telemetry_export_dir=_optional_path("TELEMETRY_EXPORT_DIR"),
