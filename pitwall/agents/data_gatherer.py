@@ -3,6 +3,14 @@ data_gatherer.py -- the ONLY module allowed to import from pitwall.server.
 
 Fetches all session and telemetry data needed by the analysis agents.
 Returns a SessionPayload dict.
+
+Reference lap strategy:
+  When the session has sector-best data (best_s1_lap_id / best_s2_lap_id from metadata),
+  each corner is compared against the lap that set the best time in that sector.
+  This shows the TRUE gap to what the driver has already done — typically 1-2s for
+  a driver who has been inconsistent across a session.
+
+  Fallback: use a driven reference lap, or self-comparison if no other laps exist.
 """
 
 import logging
@@ -28,6 +36,9 @@ log = logging.getLogger(__name__)
 _CORE_CHANNELS    = ["speed_kph", "brake_pct", "throttle_pct", "gear"]
 _BRAKING_CHANNELS = ["speed_kph", "brake_pct", "long_g"]
 _BALANCE_CHANNELS = ["speed_kph", "steering_deg", "lat_g"]
+
+# Sector 1 / Sector 2 boundary — mirrors the ingest.py SECTOR_BOUNDARY_M constant
+SECTOR_BOUNDARY_M = 580.0
 
 
 def _downsample(samples: list[dict], n: int = 100) -> list[dict]:
@@ -73,36 +84,64 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         raise ValueError(f"No laps found for session {session_id}")
 
     best_lap = next((l for l in laps if l["is_best"]), None)
-    ref_lap  = next((l for l in laps if l["is_reference"]), None)
-
     if best_lap is None:
         raise ValueError("No best lap found")
 
-    if ref_lap is None:
-        candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
-        if candidates:
-            ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
+    best_id = best_lap["lap_id"]
 
-    best_id  = best_lap["lap_id"]
-    ref_id   = ref_lap["lap_id"] if ref_lap else best_id
-    ref_type = "driven" if ref_lap else "self"
+    # ------------------------------------------------------------------
+    # Determine reference strategy
+    # ------------------------------------------------------------------
+    best_s1_lap_id = meta.get("best_s1_lap_id")
+    best_s2_lap_id = meta.get("best_s2_lap_id")
 
-    log.info("Best: %s   Ref: %s (%s)", best_id, ref_id, ref_type)
+    # Use sector-best reference when we have different sector bests
+    # (i.e. the driver's best S1 and best S2 came from different laps, or
+    # either sector best is better than the overall best lap)
+    use_sector_ref = (
+        best_s1_lap_id is not None
+        and best_s2_lap_id is not None
+        and (best_s1_lap_id != best_id or best_s2_lap_id != best_id)
+    )
 
+    if use_sector_ref:
+        ref_type = "sector_best"
+        log.info("Reference: sector-best  S1=%s  S2=%s", best_s1_lap_id, best_s2_lap_id)
+    else:
+        # Fallback: driven reference or self
+        ref_lap = next((l for l in laps if l["is_reference"]), None)
+        if ref_lap is None:
+            candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
+            if candidates:
+                ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
+        ref_id   = ref_lap["lap_id"] if ref_lap else best_id
+        ref_type = "driven" if ref_lap else "self"
+        log.info("Reference: %s  lap=%s", ref_type, ref_id)
+
+    # ------------------------------------------------------------------
+    # Build per-corner payloads
+    # ------------------------------------------------------------------
     corner_payloads = []
     for corner in VALLELUNGA_CORNERS:
         name = corner["name"]
         s_m, e_m = float(corner["start_m"]), float(corner["end_m"])
 
         best_core = get_lap_trace(best_id, _CORE_CHANNELS, s_m, e_m)
-        ref_core  = get_lap_trace(ref_id,  _CORE_CHANNELS, s_m, e_m)
+
+        if use_sector_ref:
+            # Route each corner to the lap that set the best time in its sector
+            corner_mid    = (s_m + e_m) / 2
+            sector_ref_id = best_s1_lap_id if corner_mid < SECTOR_BOUNDARY_M else best_s2_lap_id
+            ref_core = get_lap_trace(sector_ref_id, _CORE_CHANNELS, s_m, e_m)
+        else:
+            ref_core = get_lap_trace(ref_id, _CORE_CHANNELS, s_m, e_m)
 
         payload = {
-            "corner_name": name,
-            "start_m":     s_m,
-            "end_m":       e_m,
-            "best_trace":  _downsample(best_core.get("samples", [])),
-            "ref_trace":   _downsample(ref_core.get("samples",  [])),
+            "corner_name":   name,
+            "start_m":       s_m,
+            "end_m":         e_m,
+            "best_trace":    _downsample(best_core.get("samples", [])),
+            "ref_trace":     _downsample(ref_core.get("samples", [])),
             "needs_braking": False,
             "needs_balance": False,
         }
@@ -112,7 +151,7 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
             payload["best_braking_trace"] = _downsample(bt.get("samples", []))
             payload["needs_braking"] = True
 
-        bal = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
+        bal         = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
         bal_samples = bal.get("samples", [])
         if _flag_balance(bal_samples):
             payload["best_balance_trace"] = _downsample(bal_samples)
@@ -122,7 +161,9 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         log.info("  %s: best=%d ref=%d", name,
                  len(payload["best_trace"]), len(payload["ref_trace"]))
 
-    # Optional AC data
+    # ------------------------------------------------------------------
+    # Optional AC data (used by synthetic lap agent, not for reference)
+    # ------------------------------------------------------------------
     car_data = track_data = None
     if config.ac_root is not None:
         cd = get_ac_car_data(meta.get("car", ""))
@@ -136,7 +177,6 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         "session_id":      session_id,
         "session_meta":    meta,
         "best_lap_id":     best_id,
-        "ref_lap_id":      ref_id,
         "ref_type":        ref_type,
         "corner_payloads": corner_payloads,
         "car_data":        car_data,

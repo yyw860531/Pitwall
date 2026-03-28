@@ -243,6 +243,154 @@ def _build_corner_summary(
     return results
 
 
+# Sector boundary (must match ingest.py SECTOR_BOUNDARY_M)
+SECTOR_BOUNDARY_M = 580.0
+
+
+def _build_all_lap_traces(
+    conn: sqlite3.Connection,
+    laps: list[dict],
+    n_points: int = SPEED_TRACE_POINTS,
+) -> dict:
+    """
+    Build downsampled speed + input traces for every valid lap.
+    Keyed by lap_number (as string) for easy JSON serialisation.
+    Used by the dashboard lap selector.
+    """
+    result = {}
+    for lap in laps:
+        if not lap["is_valid"] or not lap["lap_time_ms"]:
+            continue
+        samples = _fetch_lap_telemetry(conn, lap["lap_id"])
+        if len(samples) < 10:
+            continue
+
+        dist  = np.array([s["lap_distance_m"] for s in samples])
+        speed = np.array([s["speed_kph"]      or 0 for s in samples])
+        thr   = np.array([s["throttle_pct"]   or 0 for s in samples])
+        brk   = np.array([s["brake_pct"]      or 0 for s in samples])
+
+        grid        = np.linspace(dist.min(), dist.max(), n_points)
+        speed_interp = np.interp(grid, dist, speed)
+        thr_interp   = np.interp(grid, dist, thr)
+        brk_interp   = np.interp(grid, dist, brk)
+
+        result[str(lap["lap_number"])] = {
+            "lap_number":  lap["lap_number"],
+            "lap_time_ms": lap["lap_time_ms"],
+            "is_best":     bool(lap["is_best"]),
+            "speed_trace": [
+                {"distance_m": round(float(g), 1), "speed_kph": round(float(s), 2)}
+                for g, s in zip(grid, speed_interp)
+            ],
+            "input_trace": [
+                {
+                    "distance_m":   round(float(g), 1),
+                    "throttle_pct": round(float(t), 1),
+                    "brake_pct":    round(float(b), 1),
+                }
+                for g, t, b in zip(grid, thr_interp, brk_interp)
+            ],
+        }
+    return result
+
+
+def _build_theoretical_best_trace(
+    conn: sqlite3.Connection,
+    laps: list[dict],
+    sector_boundary_m: float = SECTOR_BOUNDARY_M,
+    n_points: int = SPEED_TRACE_POINTS,
+) -> dict | None:
+    """
+    Stitch together the best-S1 lap (distance < boundary) and best-S2 lap
+    (distance >= boundary) to produce a theoretical best speed trace.
+    Returns None if sector data is unavailable.
+    """
+    valid = [l for l in laps if l["is_valid"] and l["s1_ms"] and l["s2_ms"]]
+    if not valid:
+        return None
+
+    best_s1_lap = min(valid, key=lambda l: l["s1_ms"])
+    best_s2_lap = min(valid, key=lambda l: l["s2_ms"])
+
+    s1_samples = [
+        s for s in _fetch_lap_telemetry(conn, best_s1_lap["lap_id"])
+        if s["lap_distance_m"] < sector_boundary_m
+    ]
+    s2_samples = [
+        s for s in _fetch_lap_telemetry(conn, best_s2_lap["lap_id"])
+        if s["lap_distance_m"] >= sector_boundary_m
+    ]
+    all_samples = s1_samples + s2_samples
+    if len(all_samples) < 10:
+        return None
+
+    dist  = np.array([s["lap_distance_m"] for s in all_samples])
+    speed = np.array([s["speed_kph"]      or 0 for s in all_samples])
+    thr   = np.array([s["throttle_pct"]   or 0 for s in all_samples])
+    brk   = np.array([s["brake_pct"]      or 0 for s in all_samples])
+
+    grid         = np.linspace(dist.min(), dist.max(), n_points)
+    speed_interp = np.interp(grid, dist, speed)
+    thr_interp   = np.interp(grid, dist, thr)
+    brk_interp   = np.interp(grid, dist, brk)
+
+    return {
+        "best_s1_lap_number": best_s1_lap["lap_number"],
+        "best_s2_lap_number": best_s2_lap["lap_number"],
+        "lap_time_ms": best_s1_lap["s1_ms"] + best_s2_lap["s2_ms"],
+        "speed_trace": [
+            {"distance_m": round(float(g), 1), "speed_kph": round(float(s), 2)}
+            for g, s in zip(grid, speed_interp)
+        ],
+        "input_trace": [
+            {
+                "distance_m":   round(float(g), 1),
+                "throttle_pct": round(float(t), 1),
+                "brake_pct":    round(float(b), 1),
+            }
+            for g, t, b in zip(grid, thr_interp, brk_interp)
+        ],
+    }
+
+
+def _find_track_map(track_id: str, ac_root) -> Path | None:
+    """
+    Locate map.png for a track in the AC installation.
+    Handles multi-layout tracks where the map lives in a layout sub-folder.
+    """
+    if ac_root is None:
+        return None
+
+    tracks_dir = ac_root / "content" / "tracks"
+
+    # 1. Direct match
+    direct = tracks_dir / track_id / "map.png"
+    if direct.exists():
+        return direct
+
+    # 2. Known multi-layout mappings (AC uses parent/layout folder structure)
+    known = {
+        "ks_vallelungaclub_circuit":     ("ks_vallelunga", "club_circuit"),
+        "ks_vallelungaextended_circuit": ("ks_vallelunga", "extended_circuit"),
+        "ks_vallelungaclassic_circuit":  ("ks_vallelunga", "classic_circuit"),
+        "ks_nordschleife":               ("ks_nordschleife", "nordschleife"),
+        "ks_nordschleife_touristenfahrten": ("ks_nordschleife", "touristenfahrten"),
+    }
+    if track_id in known:
+        base, layout = known[track_id]
+        p = tracks_dir / base / layout / "map.png"
+        if p.exists():
+            return p
+
+    # 3. Glob fallback — search under any folder starting with track_id prefix
+    prefix = track_id[:8] if len(track_id) > 8 else track_id
+    for candidate in tracks_dir.glob(f"*{prefix}*/*/map.png"):
+        return candidate
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Main export function
 # ---------------------------------------------------------------------------
@@ -315,6 +463,21 @@ def export(
 
         corner_summary = _build_corner_summary(best_samples, ref_samples, VALLELUNGA_CORNERS)
 
+        # --- Per-lap traces for the dashboard lap selector ---
+        all_lap_traces       = _build_all_lap_traces(conn, laps)
+        theoretical_best_trace = _build_theoretical_best_trace(conn, laps)
+
+        # --- Track map ---
+        track_map_url = None
+        if config.ac_root is not None:
+            map_src = _find_track_map(session["track"], config.ac_root)
+            if map_src and map_src.exists():
+                map_dst = output_path.parent / "track_map.png"
+                import shutil
+                shutil.copy2(str(map_src), str(map_dst))
+                track_map_url = "track_map.png"
+                log.info("Track map copied: %s", map_dst)
+
         dashboard = {
             "$schema": "pitwall-dashboard-v1",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -333,6 +496,8 @@ def export(
                 "reference_type":        ref_type,
                 "theoretical_best_ms":   theoretical_best_ms,
                 "sector_count":          2,
+                "track_map_url":         track_map_url,
+                "sector_boundary_m":     SECTOR_BOUNDARY_M,
             },
             "laps": [
                 {
@@ -353,6 +518,8 @@ def export(
             "speed_trace": speed_trace,
             "input_trace": input_trace,
             "corner_summary": corner_summary,
+            "all_lap_traces":        all_lap_traces,
+            "theoretical_best_trace": theoretical_best_trace,
             "coaching_report": coaching_report if coaching_report else {
                 "reference_type":  ref_type,
                 "reference_note":  None,

@@ -211,11 +211,22 @@ def get_session_metadata(session_id: str) -> dict:
         best_s2 = min((r["s2_ms"] for r in laps if r["s2_ms"] is not None), default=None)
         theoretical_best_ms = (best_s1 + best_s2) if (best_s1 and best_s2) else None
 
+        best_s1_row = conn.execute(
+            "SELECT lap_id FROM laps WHERE session_id=? AND s1_ms IS NOT NULL AND is_valid=1 ORDER BY s1_ms LIMIT 1",
+            (session_id,)
+        ).fetchone()
+        best_s2_row = conn.execute(
+            "SELECT lap_id FROM laps WHERE session_id=? AND s2_ms IS NOT NULL AND is_valid=1 ORDER BY s2_ms LIMIT 1",
+            (session_id,)
+        ).fetchone()
+
         return {
             **dict(session),
             "lap_count": len(laps),
             "valid_lap_count": len(valid_times),
             "theoretical_best_ms": theoretical_best_ms,
+            "best_s1_lap_id": best_s1_row["lap_id"] if best_s1_row else None,
+            "best_s2_lap_id": best_s2_row["lap_id"] if best_s2_row else None,
             "laps": [dict(r) for r in laps],
         }
     finally:
@@ -263,10 +274,26 @@ def get_ac_car_data(car_id: str) -> dict:
         except (KeyError, ValueError):
             return None
 
+    # Read ai.ini: contains SPEED_MULTIPLIER that scales fast_lane.ai speed hints
+    # for this specific car's performance envelope.
+    ai_ini = car_path / "data" / "ai.ini"
+    ai_speed_multiplier = 1.0
+    if ai_ini.exists():
+        cp2 = configparser.ConfigParser(strict=False)
+        cp2.read(str(ai_ini))
+        for section in cp2.sections():
+            for key in ("SPEED_MULTIPLIER", "speed_multiplier"):
+                try:
+                    ai_speed_multiplier = float(cp2[section][key])
+                    break
+                except (KeyError, ValueError):
+                    pass
+
     return {
-        "car_id": car_id,
-        "mass_kg": _ini_float("BASIC", "TOTALMASS"),
-        "fuel_consumption": _ini_float("FUEL", "CONSUMPTION"),
+        "car_id":              car_id,
+        "mass_kg":             _ini_float("BASIC", "TOTALMASS"),
+        "fuel_consumption":    _ini_float("FUEL", "CONSUMPTION"),
+        "ai_speed_multiplier": ai_speed_multiplier,
     }
 
 
@@ -319,26 +346,69 @@ def get_ac_track_line(track_id: str) -> dict:
 
 def _parse_ai_file(ai_path: Path) -> list[dict]:
     """
-    Parse MoTeC/AC binary fast_lane.ai file.
-    Format: header (4 bytes count) + N * (3 floats xyz + 1 float speed_hint)
-    Returns list of {distance_m, x, y, z} dicts.
+    Parse AC fast_lane.ai binary file.
+
+    Format: int32 count + N records of floats.
+    Record layout (all known AC versions):
+      float x, y, z       -- world position (metres)
+      float speed_ms      -- AI speed hint for this point (m/s)
+      float ...           -- optional extra fields (side distances, etc.)
+
+    Record size is auto-detected: whichever of 16/20/24 bytes gives exact
+    file coverage with the stored count wins.
     """
     import struct
     data = ai_path.read_bytes()
+    file_size = len(data)
+
     count = struct.unpack_from("<I", data, 0)[0]
+
+    # Detect record size: which multiplier gives exact file coverage?
+    record_size = None
+    for rs in (16, 20, 24):
+        if 4 + count * rs == file_size:
+            record_size = rs
+            break
+    if record_size is None:
+        # Header count may be stale — infer from arithmetic
+        for rs in (20, 24, 16):
+            if (file_size - 4) % rs == 0:
+                count = (file_size - 4) // rs
+                record_size = rs
+                break
+    if record_size is None:
+        raise ValueError(
+            f"Cannot determine fast_lane.ai record format (file_size={file_size}, "
+            f"header_count={count})"
+        )
+
+    n_floats = record_size // 4
+    fmt = f"<{n_floats}f"
     points = []
     offset = 4
     cum_dist = 0.0
     prev_xyz = None
 
-    for i in range(count):
-        x, y, z, _ = struct.unpack_from("<ffff", data, offset)
-        offset += 16
+    for _ in range(count):
+        floats = struct.unpack_from(fmt, data, offset)
+        offset += record_size
+        x, y, z = floats[0], floats[1], floats[2]
+        # Field 3 (index 3) is the AI speed hint in m/s across all AC formats.
+        # In 16-byte records it is the only non-xyz field.
+        # In 20/24-byte records extra fields follow (side distances, etc.).
+        speed_ms = float(floats[3]) if n_floats > 3 else 0.0
+
         xyz = np.array([x, y, z])
         if prev_xyz is not None:
             cum_dist += float(np.linalg.norm(xyz - prev_xyz))
-        points.append({"distance_m": round(cum_dist, 2), "x": round(float(x), 3),
-                        "y": round(float(y), 3), "z": round(float(z), 3)})
+
+        points.append({
+            "distance_m": round(cum_dist, 2),
+            "x":          round(float(x), 3),
+            "y":          round(float(y), 3),
+            "z":          round(float(z), 3),
+            "speed_ms":   round(speed_ms, 3),
+        })
         prev_xyz = xyz
 
     return points

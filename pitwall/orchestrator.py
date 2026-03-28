@@ -30,8 +30,11 @@ from pitwall.agents import (  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# Top N corners to analyse (by estimated time loss)
-_CORNERS_TO_ANALYSE = 3
+# Threshold-based corner selection:
+#   Analyse every corner with estimated loss >= this value (ms).
+#   Cap at _MAX_CORNERS for very long tracks (e.g. Nürburgring).
+_MIN_TIME_LOSS_MS = 80
+_MAX_CORNERS      = 12
 
 
 def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
@@ -60,11 +63,8 @@ def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
     session_meta["reference_type"] = payload["ref_type"]
 
     # ------------------------------------------------------------------
-    # Step 2: Corner analysis (top N by estimated time loss)
+    # Step 2: Corner analysis — all corners above time-loss threshold
     # ------------------------------------------------------------------
-    log.info("[2/5] Running corner analysis (top %d corners)...", _CORNERS_TO_ANALYSE)
-
-    # Sort corner_payloads by estimated time loss from corner_summary
     time_loss_map = {
         c["corner_name"]: c.get("delta", {}).get("estimated_time_loss_ms", 0)
         for c in corner_summary
@@ -74,7 +74,16 @@ def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
         key=lambda cp: time_loss_map.get(cp["corner_name"], 0),
         reverse=True,
     )
-    top_corners = sorted_corners[:_CORNERS_TO_ANALYSE]
+    # Include corners above threshold; always include at least top 2; cap at _MAX_CORNERS
+    top_corners = [
+        cp for cp in sorted_corners
+        if time_loss_map.get(cp["corner_name"], 0) >= _MIN_TIME_LOSS_MS
+    ][:_MAX_CORNERS]
+    if not top_corners:
+        top_corners = sorted_corners[:2]
+
+    log.info("[2/5] Analysing %d corners (loss >= %dms, cap %d)...",
+             len(top_corners), _MIN_TIME_LOSS_MS, _MAX_CORNERS)
 
     corner_analyses = []
     for cp in top_corners:
