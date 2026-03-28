@@ -1,0 +1,43 @@
+# Environment — .env is committed with placeholder values.
+# After adding your real ANTHROPIC_API_KEY, run:
+#   git update-index --skip-worktree .env
+# This tells git to stop tracking local changes to that file.
+
+# Claude Code IDE settings (machine-specific)
+.claude/
+
+# Database
+db/
+*.db
+
+# Session telemetry files (can be large)
+data/sessions/
+
+# Generated dashboard output
+dashboard/public/dashboard.json
+
+# ldparser (cloned from github.com/gotzl/ldparser — not on PyPI)
+# Clone it yourself: git clone https://github.com/gotzl/ldparser.git
+ldparser/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
