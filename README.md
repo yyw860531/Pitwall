@@ -1,10 +1,20 @@
 # PitWall
 
-> **Your personal AI race engineer. No garage required.**
+> **Want your own Peter Bonnington? Your own GP Lambiase? Here's one — and it never sleeps.**
 
-PitWall reads your Assetto Corsa telemetry and delivers corner-by-corner coaching — the kind a real race engineer would give. Powered by Claude, FastMCP, and MoTeC data.
+In F1, the voice in your ear makes the difference. Bono tells Lewis exactly where he's losing time. GP tells Max precisely where to push harder. That relationship — driver and race engineer, data and instinct — is what separates a good lap from a great one.
+
+PitWall brings that to sim racing.
+
+After every Assetto Corsa session, PitWall reads your telemetry, runs it through a pipeline of specialised AI agents, and delivers the kind of corner-by-corner coaching that usually only exists in a professional motorsport garage. Not generic advice — specific data. *"You're braking 12 metres earlier than your reference at T4. That's 263ms. Here's what to do about it."*
 
 ![Dashboard preview](docs/dashboard_preview.png)
+
+### How the telemetry gets captured
+
+On track, [Telemetrick](https://www.telemetrick.com/) runs inside Assetto Corsa and logs everything — speed, throttle, brake, steering, G-forces — at 30Hz into a MoTeC `.ld` file. The moment you finish a session, PitWall picks it up automatically (via file watcher), ingests it into SQLite, and has your coaching report ready before you've taken your helmet off.
+
+No manual export steps. No copying files. Just drive, then read.
 
 ---
 
@@ -12,11 +22,11 @@ PitWall reads your Assetto Corsa telemetry and delivers corner-by-corner coachin
 
 After each session, PitWall:
 
-1. **Reads** your `.ld` telemetry file exported by [Telemetrick](https://www.telemetrick.com/)
+1. **Captures** your `.ld` telemetry automatically via [Telemetrick](https://www.telemetrick.com/) — file watcher ingests it the moment AC writes it
 2. **Compares** your laps corner-by-corner — brake points, minimum speed, throttle pickup
-3. **Runs** specialist AI agents (braking, balance, corner analysis) to identify where time is lost
-4. **Delivers** a prioritised coaching report: one problem at a time, never overwhelming
-5. **Renders** everything in a visual dashboard — speed traces, input overlays, delta tables
+3. **Runs** specialist AI agents (braking efficiency, balance diagnosis, corner analysis) to identify exactly where time is lost
+4. **Delivers** a prioritised coaching report: the biggest problem first, specific numbers, actionable fixes
+5. **Renders** everything in a visual dashboard — speed traces, input overlays, corner delta tables
 
 **Current setup:** Abarth 500 SS · Vallelunga Club · chasing 2 seconds
 
@@ -263,4 +273,4 @@ MIT
 
 ---
 
-*Built with Claude, FastMCP, and a desire to find 2 seconds at Vallelunga.*
+*Built with Claude, FastMCP, and the belief that every driver deserves a GP Lambiase in their corner.*
