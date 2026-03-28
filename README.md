@@ -77,7 +77,7 @@ After each session, PitWall:
 ### Install
 
 ```bash
-git clone https://github.com/yuyangwu0325/Pitwall.git
+git clone https://github.com/yyw860531/Pitwall.git
 cd Pitwall
 
 # Python dependencies
