@@ -32,14 +32,15 @@ log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
-    session_id      TEXT PRIMARY KEY,
-    car             TEXT NOT NULL,
-    track           TEXT NOT NULL,
-    date            TEXT NOT NULL,
-    driver          TEXT NOT NULL,
-    fastest_lap     INTEGER,
-    fastest_time_ms INTEGER,
-    sector_count    INTEGER DEFAULT 2
+    session_id          TEXT PRIMARY KEY,
+    car                 TEXT NOT NULL,
+    track               TEXT NOT NULL,
+    date                TEXT NOT NULL,
+    driver              TEXT NOT NULL,
+    fastest_lap         INTEGER,
+    fastest_time_ms     INTEGER,
+    sector_count        INTEGER DEFAULT 2,
+    coaching_report_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS laps (
@@ -291,6 +292,10 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.executescript(SCHEMA)
+    # Migration: add coaching_report_json if missing (existing DBs)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "coaching_report_json" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN coaching_report_json TEXT")
     conn.commit()
     log.info("Database ready: %s", db_path)
     return conn

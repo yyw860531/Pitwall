@@ -395,6 +395,48 @@ def _find_track_map(track_id: str, ac_root) -> Path | None:
 # Main export function
 # ---------------------------------------------------------------------------
 
+def _resolve_coaching_report(
+    conn, session_id, coaching_report, ref_type, theoretical_best_ms, best_lap, corner_summary
+) -> dict:
+    """Return coaching report: provided > saved in DB > placeholder."""
+    if coaching_report is not None:
+        return coaching_report
+
+    # Load from DB if analysis was previously run
+    row = conn.execute(
+        "SELECT coaching_report_json FROM sessions WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    if row and row[0]:
+        try:
+            return json.loads(row[0])
+        except Exception:
+            pass
+
+    # Placeholder — agents haven't run yet
+    return {
+        "reference_type":  ref_type,
+        "reference_note":  None,
+        "full_markdown":   "## Analysis pending\n\nClick **Run AI Analysis** to generate the full coaching report.",
+        "priority_corners": [
+            {
+                "rank":                   c["priority"],
+                "corner_name":            c["corner_name"],
+                "headline":               f"Estimated {c['delta']['estimated_time_loss_ms']}ms to gain",
+                "estimated_time_gain_ms": c["delta"]["estimated_time_loss_ms"],
+            }
+            for c in corner_summary[:2]
+        ],
+        "session_summary": (
+            f"Best lap: {best_lap['lap_time_ms'] // 60000}:"
+            f"{(best_lap['lap_time_ms'] % 60000) / 1000:.3f}  |  "
+            f"Theoretical best: "
+            + (f"{theoretical_best_ms // 60000}:{(theoretical_best_ms % 60000) / 1000:.3f}"
+               if theoretical_best_ms else "N/A")
+        ),
+        "next_action": "Click Run AI Analysis for detailed coaching.",
+    }
+
+
 def export(
     session_id: str,
     output_path: Path | None = None,
@@ -520,29 +562,20 @@ def export(
             "corner_summary": corner_summary,
             "all_lap_traces":        all_lap_traces,
             "theoretical_best_trace": theoretical_best_trace,
-            "coaching_report": coaching_report if coaching_report else {
-                "reference_type":  ref_type,
-                "reference_note":  None,
-                "full_markdown":   "## Analysis pending\n\nRun `python scripts/run_session.py` to generate the full coaching report.",
-                "priority_corners": [
-                    {
-                        "rank":                    c["priority"],
-                        "corner_name":             c["corner_name"],
-                        "headline":                f"Estimated {c['delta']['estimated_time_loss_ms']}ms to gain",
-                        "estimated_time_gain_ms":  c["delta"]["estimated_time_loss_ms"],
-                    }
-                    for c in corner_summary[:2]
-                ],
-                "session_summary": (
-                    f"Best lap: {best_lap['lap_time_ms'] // 60000}:"
-                    f"{(best_lap['lap_time_ms'] % 60000) / 1000:.3f}  |  "
-                    f"Theoretical best: "
-                    + (f"{theoretical_best_ms // 60000}:{(theoretical_best_ms % 60000) / 1000:.3f}"
-                       if theoretical_best_ms else "N/A")
-                ),
-                "next_action": "Run the full agent pipeline for detailed coaching.",
-            },
+                "coaching_report": _resolve_coaching_report(
+                conn, session_id, coaching_report, ref_type,
+                theoretical_best_ms, best_lap, corner_summary,
+            ),
         }
+
+        # Persist coaching report to DB if newly provided
+        if coaching_report is not None:
+            conn.execute(
+                "UPDATE sessions SET coaching_report_json = ? WHERE session_id = ?",
+                (json.dumps(coaching_report), session_id),
+            )
+            conn.commit()
+            log.info("Coaching report saved to DB for %s", session_id)
 
         output_path.write_text(json.dumps(dashboard, indent=2))
         log.info("Dashboard written to %s", output_path)

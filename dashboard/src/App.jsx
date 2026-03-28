@@ -7,6 +7,7 @@ import CornerSummaryTable from './components/CornerSummaryTable.jsx'
 import CoachingPanel from './components/CoachingPanel.jsx'
 import TrackMap from './components/TrackMap.jsx'
 import LapCompareSelector from './components/LapCompareSelector.jsx'
+import SessionPicker from './components/SessionPicker.jsx'
 
 const S = {
   app:    { minHeight: '100vh', background: '#0a0a0f', color: '#e2e8f0' },
@@ -81,7 +82,6 @@ export default function App() {
       .then(d => {
         setData(d)
         setLoading(false)
-        // Default: best lap vs theoretical best (or existing reference)
         const bestLap = d.laps.find(l => l.is_best)
         setTargetLapNum(bestLap ? String(bestLap.lap_number) : null)
         setRefLapNum('__theoretical__')
@@ -97,16 +97,16 @@ export default function App() {
       .then(r => r.json())
       .then(result => {
         if (result.new_sessions > 0) {
-          setImportStatus(`Imported ${result.new_sessions} session(s). Reloading…`)
-          setTimeout(loadData, 1000)
+          setImportStatus(`Imported ${result.new_sessions} new session(s). Reloading…`)
+          setTimeout(loadData, 800)
         } else {
           setImportStatus('No new sessions.')
           setTimeout(() => setImportStatus(''), 3000)
         }
       })
       .catch(() => {
-        setImportStatus('API not available — run scripts/run_session.py manually.')
-        setTimeout(() => setImportStatus(''), 4000)
+        setImportStatus('Server not running — start with: python -m pitwall.server --http')
+        setTimeout(() => setImportStatus(''), 5000)
       })
   }
 
@@ -150,6 +150,11 @@ export default function App() {
         <button style={S.importBtn} onClick={handleImport}>↓ Import New Session</button>
         {importStatus && <span style={S.importStatus}>{importStatus}</span>}
       </div>
+
+      <SessionPicker
+        currentSessionId={data?.session?.session_id}
+        onSessionLoaded={loadData}
+      />
 
       <LapCompareSelector
         laps={data.laps}

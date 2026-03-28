@@ -19,12 +19,16 @@ def analyze(corner_payload: dict) -> dict:
     name = corner_payload["corner_name"]
     log.info("Corner analysis: %s", name)
 
-    user = json.dumps({
-        "corner_name":     name,
+    payload = {
+        "corner_name":      name,
         "distance_range_m": [corner_payload["start_m"], corner_payload["end_m"]],
-        "best_trace":      corner_payload["best_trace"],
-        "ref_trace":       corner_payload["ref_trace"],
-    }, separators=(",", ":"))
+        "best_trace":       corner_payload["best_trace"],
+        "ref_trace":        corner_payload["ref_trace"],
+    }
+    if corner_payload.get("sector_delta_ms") is not None:
+        payload["sector_delta_ms"] = corner_payload["sector_delta_ms"]
+
+    user = json.dumps(payload, separators=(",", ":"))
 
     try:
         result = call_claude_json(_SYSTEM, user, max_tokens=1024)

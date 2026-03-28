@@ -36,7 +36,14 @@ TIME GAIN ESTIMATION
     - Speed deficit at apex × propagation factor (use 50ms per kph as a conservative base)
     - Brake point delta time cost (10m early braking ≈ 100ms)
     - Throttle pickup delay (10m late ≈ 75ms on medium straights)
-  Sum these. Do NOT cap at small values — if the data shows 800ms available, say 800ms.
+  Sum these to get a raw estimate.
+
+  IMPORTANT — sector sanity check:
+  If the input includes "sector_delta_ms", that is the TOTAL time gap between the driver's
+  best lap and the reference in the entire sector containing this corner. Your estimate for
+  this corner alone MUST NOT exceed sector_delta_ms — a single corner cannot account for
+  more time than the whole sector lost. If your raw estimate exceeds it, scale it down
+  proportionally and note this in your assessment.
 
 Return ONLY valid JSON in this exact schema:
 {

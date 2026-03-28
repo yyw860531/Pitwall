@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 from fastmcp import FastMCP
+from starlette.responses import JSONResponse
 
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
@@ -478,8 +479,34 @@ def _detect_corners(points: list[dict], curvature_threshold: float = 0.015,
 # These run on the same uvicorn server as the MCP tools when started with --http.
 # ---------------------------------------------------------------------------
 
+@mcp.custom_route("/api/sessions", methods=["GET"])
+async def api_sessions(request):
+    """List all ingested sessions."""
+    conn = _db()
+    try:
+        rows = conn.execute("""
+            SELECT
+                s.session_id,
+                s.car,
+                s.track,
+                s.date,
+                s.driver,
+                s.fastest_lap,
+                s.fastest_time_ms,
+                COUNT(l.lap_id)     AS lap_count,
+                SUM(l.is_valid)     AS valid_lap_count
+            FROM sessions s
+            LEFT JOIN laps l ON s.session_id = l.session_id
+            GROUP BY s.session_id
+            ORDER BY s.date DESC, s.session_id DESC
+        """).fetchall()
+        return JSONResponse([dict(r) for r in rows])
+    finally:
+        conn.close()
+
+
 @mcp.custom_route("/api/scan", methods=["POST"])
-async def api_scan(request) -> dict:
+async def api_scan(request):
     """
     Scan TELEMETRY_EXPORT_DIR for .ld files not yet in the DB.
     Ingest any new ones and export the latest session's dashboard.json.
@@ -488,11 +515,11 @@ async def api_scan(request) -> dict:
     from pitwall.export import export
 
     if config.telemetry_export_dir is None:
-        return {"error": "TELEMETRY_EXPORT_DIR not configured", "new_sessions": 0}
+        return JSONResponse({"error": "TELEMETRY_EXPORT_DIR not configured", "new_sessions": 0})
 
     export_dir = config.telemetry_export_dir
     if not export_dir.exists():
-        return {"error": f"Directory not found: {export_dir}", "new_sessions": 0}
+        return JSONResponse({"error": f"Directory not found: {export_dir}", "new_sessions": 0})
 
     # Find all .ld files
     ld_files = sorted(export_dir.rglob("*.ld"))
@@ -523,19 +550,69 @@ async def api_scan(request) -> dict:
         except Exception as e:
             log.error("Export failed: %s", e)
 
-    return {"new_sessions": len(new_sessions), "sessions": new_sessions}
+    return JSONResponse({"new_sessions": len(new_sessions), "sessions": new_sessions})
 
 
 @mcp.custom_route("/api/export/{session_id}", methods=["POST"])
-async def api_export(request) -> dict:
+async def api_export(request):
     """Export a specific session to dashboard.json."""
     from pitwall.export import export
     session_id = request.path_params.get("session_id", "")
     try:
         out = export(session_id)
-        return {"status": "ok", "output": str(out)}
+        return JSONResponse({"status": "ok", "output": str(out)})
     except ValueError as e:
-        return {"error": str(e)}
+        return JSONResponse({"error": str(e)})
+
+
+@mcp.custom_route("/api/analyse/{session_id}", methods=["POST"])
+async def api_analyse(request):
+    """Run the full AI agent pipeline for a session and re-export dashboard.json."""
+    import asyncio
+    from pitwall.export import export
+
+    session_id = request.path_params.get("session_id", "")
+
+    if not config.anthropic_api_key or config.anthropic_api_key.startswith("your_"):
+        return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=400)
+
+    def _run():
+        import sqlite3 as _sqlite3
+        from pitwall.orchestrator import orchestrate
+        from pitwall.export import (
+            _build_corner_summary, _fetch_lap_telemetry, VALLELUNGA_CORNERS,
+        )
+
+        conn = _sqlite3.connect(str(config.db_path))
+        conn.row_factory = _sqlite3.Row
+        laps_rows = conn.execute(
+            "SELECT * FROM laps WHERE session_id=? ORDER BY lap_number", (session_id,)
+        ).fetchall()
+        laps = [dict(r) for r in laps_rows]
+        best_lap = next((l for l in laps if l["is_best"]), None)
+        ref_lap  = next((l for l in laps if l.get("is_reference")), None)
+        if ref_lap is None:
+            candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
+            if candidates:
+                ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
+        corner_summary = []
+        if best_lap and ref_lap:
+            best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
+            ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])
+            corner_summary = _build_corner_summary(best_samples, ref_samples, VALLELUNGA_CORNERS)
+        conn.close()
+
+        coaching_report = orchestrate(session_id, corner_summary)
+        out_path = export(session_id, coaching_report=coaching_report)
+        return str(out_path)
+
+    try:
+        loop = asyncio.get_event_loop()
+        out_path = await loop.run_in_executor(None, _run)
+        return JSONResponse({"status": "ok", "output": out_path})
+    except Exception as e:
+        log.error("Analysis failed for %s: %s", session_id, e)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------

@@ -107,6 +107,12 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
     if use_sector_ref:
         ref_type = "sector_best"
         log.info("Reference: sector-best  S1=%s  S2=%s", best_s1_lap_id, best_s2_lap_id)
+        # Compute per-sector deltas: how much the best lap loses to each sector-best reference
+        best_s1_lap = next((l for l in laps if l["lap_id"] == best_s1_lap_id), None)
+        best_s2_lap = next((l for l in laps if l["lap_id"] == best_s2_lap_id), None)
+        s1_delta_ms = max(0, (best_lap.get("s1_ms") or 0) - (best_s1_lap.get("s1_ms") or 0)) if best_s1_lap else None
+        s2_delta_ms = max(0, (best_lap.get("s2_ms") or 0) - (best_s2_lap.get("s2_ms") or 0)) if best_s2_lap else None
+        ref_id = None
     else:
         # Fallback: driven reference or self
         ref_lap = next((l for l in laps if l["is_reference"]), None)
@@ -116,6 +122,10 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
                 ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
         ref_id   = ref_lap["lap_id"] if ref_lap else best_id
         ref_type = "driven" if ref_lap else "self"
+        # Sector delta: whole lap delta, split evenly as a loose bound
+        lap_delta = max(0, (best_lap.get("lap_time_ms") or 0) - ((ref_lap or best_lap).get("lap_time_ms") or 0))
+        s1_delta_ms = lap_delta // 2
+        s2_delta_ms = lap_delta // 2
         log.info("Reference: %s  lap=%s", ref_type, ref_id)
 
     # ------------------------------------------------------------------
@@ -136,14 +146,18 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         else:
             ref_core = get_lap_trace(ref_id, _CORE_CHANNELS, s_m, e_m)
 
+        corner_mid = (s_m + e_m) / 2
+        sector_delta = s1_delta_ms if corner_mid < SECTOR_BOUNDARY_M else s2_delta_ms
+
         payload = {
-            "corner_name":   name,
-            "start_m":       s_m,
-            "end_m":         e_m,
-            "best_trace":    _downsample(best_core.get("samples", [])),
-            "ref_trace":     _downsample(ref_core.get("samples", [])),
-            "needs_braking": False,
-            "needs_balance": False,
+            "corner_name":      name,
+            "start_m":          s_m,
+            "end_m":            e_m,
+            "best_trace":       _downsample(best_core.get("samples", [])),
+            "ref_trace":        _downsample(ref_core.get("samples", [])),
+            "sector_delta_ms":  sector_delta,   # total sector gap — agent must stay within this
+            "needs_braking":    False,
+            "needs_balance":    False,
         }
 
         if _flag_braking(corner_summary or [], name):
