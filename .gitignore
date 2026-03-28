@@ -42,3 +42,4 @@ Thumbs.db
 .vscode/
 .idea/
 dashboard/public/track_map.png
+.env
