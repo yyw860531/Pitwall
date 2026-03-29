@@ -328,6 +328,8 @@ def _build_theoretical_best_trace(
     (distance >= boundary) to produce a theoretical best speed trace.
     Returns None if sector data is unavailable.
     """
+    if sector_boundary_m is None:
+        return None
     valid = [l for l in laps if l["is_valid"] and l["s1_ms"] and l["s2_ms"]]
     if not valid:
         return None
@@ -528,7 +530,7 @@ def export(
         corners = get_corners(session["track"], config.ac_root)
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
-        sector_boundary_m = session["sector_boundary_m"] or 580.0
+        sector_boundary_m = session["sector_boundary_m"]
 
         # --- Per-lap traces for the dashboard lap selector ---
         all_lap_traces       = _build_all_lap_traces(conn, laps)

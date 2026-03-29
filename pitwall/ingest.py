@@ -85,9 +85,6 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_lap_distance ON telemetry(lap_id, lap_d
 CREATE INDEX IF NOT EXISTS idx_laps_session           ON laps(session_id);
 """
 
-# Fallback sector boundary when venue_length_m is unknown.
-# Used only if the .ldx file does not report a track length.
-_SECTOR_BOUNDARY_FALLBACK_M = 580.0
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +395,7 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
            VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?)""",
         (session_id, meta["car"], meta["track"], date_fmt, meta["driver"],
          ldx["fastest_lap"], ldx["fastest_time_ms"],
-         ldx["venue_length_m"] / 2 if ldx.get("venue_length_m") else _SECTOR_BOUNDARY_FALLBACK_M)
+         ldx["venue_length_m"] / 2 if ldx.get("venue_length_m") else None)
     )
 
     # --- Segment and store laps ---
@@ -421,13 +418,9 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
         is_best = (file_pos == ldx["fastest_lap"])
 
         s1_ms, s2_ms = None, None
-        if is_valid:
-            boundary = (
-                ldx["venue_length_m"] / 2 if ldx.get("venue_length_m")
-                else _SECTOR_BOUNDARY_FALLBACK_M
-            )
+        if is_valid and ldx.get("venue_length_m"):
             s1_ms, s2_ms = compute_sector_time(
-                lap_distance_ch, lap_time_ch, mask, boundary
+                lap_distance_ch, lap_time_ch, mask, ldx["venue_length_m"] / 2
             )
 
         log.info("  Lap %d: %dms  valid=%s  best=%s  s1=%s s2=%s",
