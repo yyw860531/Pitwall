@@ -409,8 +409,12 @@ def _find_track_map(track_id: str, ac_root) -> Path | None:
         if p.exists():
             return p
 
-    # 3. Glob fallback — search under any folder starting with track_id prefix
+    # 3. Glob fallback — search under any folder matching track_id prefix
     prefix = track_id[:8] if len(track_id) > 8 else track_id
+    # Single-layout: tracks/{similar_name}/map.png
+    for candidate in tracks_dir.glob(f"*{prefix}*/map.png"):
+        return candidate
+    # Multi-layout: tracks/{similar_name}/{layout}/map.png
     for candidate in tracks_dir.glob(f"*{prefix}*/*/map.png"):
         return candidate
 
