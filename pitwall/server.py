@@ -4,6 +4,10 @@ server.py — FastMCP server exposing 6 data-only tools.
 Design rule: zero analysis logic here. Every tool is a SQL query or a file read.
 Racing knowledge lives exclusively in agents.
 
+Security note: The HTTP companion server binds to 127.0.0.1 only and has no
+authentication. This is intentional for a single-user local tool. Do not expose
+the HTTP port to untrusted networks.
+
 Run standalone (stdio transport, for use by orchestrator):
     python -m pitwall.server
 """

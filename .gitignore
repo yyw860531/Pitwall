@@ -1,7 +1,5 @@
-# Environment — .env is committed with placeholder values.
-# After adding your real ANTHROPIC_API_KEY, run:
-#   git update-index --skip-worktree .env
-# This tells git to stop tracking local changes to that file.
+# Environment — copy .env.example to .env and fill in your real values.
+# .env is gitignored and must NEVER be committed.
 
 # Claude Code IDE settings (machine-specific)
 .claude/
