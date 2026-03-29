@@ -284,10 +284,9 @@ PitWall/
 
 ## Roadmap
 
-- [ ] External reference lap (AC AI ghost → `.ld`)
+- [ ] External reference lap — import a coach's driven lap or AC AI ghost (`.ld`) as a cross-session benchmark; enables `set_reference_lap.py`
 - [ ] Multi-session progress tracking ("T4 improved 0.3s over 3 sessions")
 - [ ] Voice coaching between laps (text-to-speech via Coaching Writer)
-- [ ] Additional tracks and cars (corner map auto-generates from `fast_lane.ai`)
 - [ ] Web UI with live MCP connection
 
 ---

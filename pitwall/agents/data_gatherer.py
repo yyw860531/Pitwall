@@ -29,16 +29,13 @@ from pitwall.server import (  # noqa: E402
     get_ac_car_data,
     get_ac_track_line,
 )
-from pitwall.export import VALLELUNGA_CORNERS  # noqa: E402
+from pitwall.track import get_corners  # noqa: E402
 
 log = logging.getLogger(__name__)
 
 _CORE_CHANNELS    = ["speed_kph", "brake_pct", "throttle_pct", "gear"]
 _BRAKING_CHANNELS = ["speed_kph", "brake_pct", "long_g"]
 _BALANCE_CHANNELS = ["speed_kph", "steering_deg", "lat_g"]
-
-# Sector 1 / Sector 2 boundary — mirrors the ingest.py SECTOR_BOUNDARY_M constant
-SECTOR_BOUNDARY_M = 580.0
 
 
 def _downsample(samples: list[dict], n: int = 100) -> list[dict]:
@@ -131,8 +128,10 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
     # ------------------------------------------------------------------
     # Build per-corner payloads
     # ------------------------------------------------------------------
+    corners = get_corners(meta.get("track", ""), config.ac_root)
+    sector_boundary_m = meta["sector_boundary_m"]
     corner_payloads = []
-    for corner in VALLELUNGA_CORNERS:
+    for corner in corners:
         name = corner["name"]
         s_m, e_m = float(corner["start_m"]), float(corner["end_m"])
 
@@ -141,13 +140,13 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         if use_sector_ref:
             # Route each corner to the lap that set the best time in its sector
             corner_mid    = (s_m + e_m) / 2
-            sector_ref_id = best_s1_lap_id if corner_mid < SECTOR_BOUNDARY_M else best_s2_lap_id
+            sector_ref_id = best_s1_lap_id if corner_mid < sector_boundary_m else best_s2_lap_id
             ref_core = get_lap_trace(sector_ref_id, _CORE_CHANNELS, s_m, e_m)
         else:
             ref_core = get_lap_trace(ref_id, _CORE_CHANNELS, s_m, e_m)
 
         corner_mid = (s_m + e_m) / 2
-        sector_delta = s1_delta_ms if corner_mid < SECTOR_BOUNDARY_M else s2_delta_ms
+        sector_delta = s1_delta_ms if corner_mid < sector_boundary_m else s2_delta_ms
 
         payload = {
             "corner_name":      name,

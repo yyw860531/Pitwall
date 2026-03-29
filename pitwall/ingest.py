@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     fastest_lap         INTEGER,
     fastest_time_ms     INTEGER,
     sector_count        INTEGER DEFAULT 2,
+    sector_boundary_m   REAL DEFAULT 580.0,
     coaching_report_json TEXT
 );
 
@@ -392,10 +393,10 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     # fastest_lap in .ldx is 1-indexed; store as 1-indexed
     conn.execute(
         """INSERT INTO sessions
-           (session_id, car, track, date, driver, fastest_lap, fastest_time_ms, sector_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 2)""",
+           (session_id, car, track, date, driver, fastest_lap, fastest_time_ms, sector_count, sector_boundary_m)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?)""",
         (session_id, meta["car"], meta["track"], date_fmt, meta["driver"],
-         ldx["fastest_lap"], ldx["fastest_time_ms"])
+         ldx["fastest_lap"], ldx["fastest_time_ms"], SECTOR_1_END_M)
     )
 
     # --- Segment and store laps ---

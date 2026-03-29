@@ -21,6 +21,7 @@ import numpy as np
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 from config import config  # noqa: E402
+from pitwall.track import get_corners  # noqa: E402
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -61,14 +62,6 @@ TRACK_LENGTH_M: dict[str, float] = {
     "ks_mugello":                    5245.0,
 }
 
-
-VALLELUNGA_CORNERS = [
-    {"name": "T1_Curva_Grande",  "display": "T1 Curva Grande",  "start_m":  50,  "apex_m": 140,  "end_m": 220},
-    {"name": "T2_Chicane_Entry", "display": "T2 Chicane Entry", "start_m": 320,  "apex_m": 375,  "end_m": 430},
-    {"name": "T3_Chicane_Exit",  "display": "T3 Chicane Exit",  "start_m": 430,  "apex_m": 482,  "end_m": 530},
-    {"name": "T4_Tornantino",    "display": "T4 Tornantino",    "start_m": 700,  "apex_m": 798,  "end_m": 900},
-    {"name": "T5_Final_Chicane", "display": "T5 Final Chicane", "start_m":1200,  "apex_m":1320,  "end_m":1455},
-]
 
 SPEED_TRACE_POINTS = 200   # fixed-length arrays for the dashboard charts
 BRAKE_THRESHOLD_PCT = 5.0  # Brake Pos > 5% counts as braking
@@ -275,9 +268,6 @@ def _build_corner_summary(
     return results
 
 
-# Sector boundary (must match ingest.py SECTOR_BOUNDARY_M)
-SECTOR_BOUNDARY_M = 580.0
-
 
 def _build_all_lap_traces(
     conn: sqlite3.Connection,
@@ -330,7 +320,7 @@ def _build_all_lap_traces(
 def _build_theoretical_best_trace(
     conn: sqlite3.Connection,
     laps: list[dict],
-    sector_boundary_m: float = SECTOR_BOUNDARY_M,
+    sector_boundary_m: float,
     n_points: int = SPEED_TRACE_POINTS,
 ) -> dict | None:
     """
@@ -535,11 +525,14 @@ def export(
         input_trace["best_lap_number"]  = best_lap["lap_number"]
         input_trace["reference_lap_number"] = ref_lap["lap_number"] if ref_lap else None
 
-        corner_summary = _build_corner_summary(best_samples, ref_samples, VALLELUNGA_CORNERS)
+        corners = get_corners(session["track"], config.ac_root)
+        corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
+
+        sector_boundary_m = session["sector_boundary_m"] or 580.0
 
         # --- Per-lap traces for the dashboard lap selector ---
         all_lap_traces       = _build_all_lap_traces(conn, laps)
-        theoretical_best_trace = _build_theoretical_best_trace(conn, laps)
+        theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
 
         # --- Track map ---
         track_map_url = None
@@ -569,9 +562,9 @@ def export(
                 "reference_lap_number":  ref_lap["lap_number"] if ref_lap else None,
                 "reference_type":        ref_type,
                 "theoretical_best_ms":   theoretical_best_ms,
-                "sector_count":          2,
+                "sector_count":          session["sector_count"],
                 "track_map_url":         track_map_url,
-                "sector_boundary_m":     SECTOR_BOUNDARY_M,
+                "sector_boundary_m":     sector_boundary_m,
             },
             "laps": [
                 {
