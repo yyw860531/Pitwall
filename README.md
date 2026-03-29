@@ -291,13 +291,15 @@ PitWall/
 
 ## Roadmap
 
-- [ ] **Agent eval framework** — systematic evaluation of agent output quality (see below)
-- [ ] Agent eval framework — [plan](docs/eval-plan.md)
-- [ ] External reference lap — import a faster driver's `.ld` or AC AI ghost as a cross-session benchmark
-- [ ] Multi-session progress tracking ("T4 improved 0.3s over 3 sessions")
-- [ ] MCP architecture refinement — resources, tool granularity, auth model
-- [ ] Voice coaching between laps (text-to-speech via Coaching Writer)
-- [ ] Web UI with live MCP connection
+Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan: [docs/eval-plan.md](docs/eval-plan.md)
+
+**Next up:**
+- [ ] Track Strategy Agent — weight corner priority by straight length and corner sequences
+- [ ] Consistency Agent — identify high-variance corners across laps
+- [ ] Optimal braking point calculation from deceleration profiles
+- [ ] Agent eval framework with golden session fixtures
+
+**Done:**
 - [x] Any car, any track support — no per-track hardcoding
 - [x] Real sector boundaries from AC `sections.ini` (2 or 3 sectors)
 - [x] Corner detection from lateral-G telemetry (no AI file needed)
