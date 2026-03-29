@@ -133,7 +133,13 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
     # ------------------------------------------------------------------
     # Build per-corner payloads
     # ------------------------------------------------------------------
-    corners = get_corners(meta.get("track", ""), config.ac_root)
+    valid_laps = [l for l in laps if l["is_valid"]]
+    all_valid_samples = [
+        get_lap_trace(l["lap_id"], _CORE_CHANNELS)
+        for l in valid_laps
+    ]
+    all_valid_samples = [t.get("samples", []) for t in all_valid_samples if t.get("samples")]
+    corners = get_corners(meta.get("track", ""), config.ac_root, all_valid_samples)
     sector_boundary_m = meta["sector_boundary_m"]
     corner_payloads = []
     for corner in corners:

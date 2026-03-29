@@ -513,12 +513,26 @@ def build_dashboard(
         input_trace["best_lap_number"]      = best_lap["lap_number"]
         input_trace["reference_lap_number"] = ref_lap["lap_number"] if ref_lap else None
 
-        corners        = get_corners(session["track"], config.ac_root)
+        all_valid_samples = [
+            _fetch_lap_telemetry(conn, l["lap_id"])
+            for l in valid_laps
+        ]
+        corners        = get_corners(session["track"], config.ac_root, all_valid_samples)
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
         sector_boundary_m      = session["sector_boundary_m"]
         all_lap_traces         = _build_all_lap_traces(conn, laps)
         theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
+
+        # --- Track map as base64 data URI (works for both API and file paths) ---
+        track_map_url = None
+        if config.ac_root is not None:
+            map_src = _find_track_map(session["track"], config.ac_root)
+            if map_src and map_src.exists():
+                import base64
+                track_map_url = "data:image/png;base64," + base64.b64encode(
+                    map_src.read_bytes()
+                ).decode()
 
         # Persist new coaching report to DB before resolving
         if coaching_report is not None:
@@ -547,7 +561,7 @@ def build_dashboard(
                 "reference_type":       ref_type,
                 "theoretical_best_ms":  theoretical_best_ms,
                 "sector_count":         session["sector_count"],
-                "track_map_url":        None,  # only set when writing to file
+                "track_map_url":        track_map_url,
                 "sector_boundary_m":    sector_boundary_m,
             },
             "laps": [
@@ -586,18 +600,6 @@ def export(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     dashboard = build_dashboard(session_id, coaching_report)
-
-    # Copy track map into the static dir when writing to file
-    if config.ac_root is not None:
-        track_id = dashboard["session"]["track_id"]
-        map_src  = _find_track_map(track_id, config.ac_root)
-        if map_src and map_src.exists():
-            import shutil
-            map_dst = output_path.parent / "track_map.png"
-            shutil.copy2(str(map_src), str(map_dst))
-            dashboard["session"]["track_map_url"] = "track_map.png"
-            log.info("Track map copied: %s", map_dst)
-
     output_path.write_text(json.dumps(dashboard, indent=2))
     log.info("Dashboard written to %s", output_path)
     return output_path

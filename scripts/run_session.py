@@ -115,7 +115,9 @@ def main() -> None:
     if best_lap and ref_lap:
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])
-        corners = get_corners(session.get("track", ""), config.ac_root)
+        valid_laps_s = [l for l in laps if l["is_valid"]]
+        all_valid_samples = [_fetch_lap_telemetry(conn, l["lap_id"]) for l in valid_laps_s]
+        corners = get_corners(session.get("track", ""), config.ac_root, all_valid_samples)
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
     conn.close()

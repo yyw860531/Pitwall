@@ -1,9 +1,11 @@
 """
-track.py — corner map detection from AC fast_lane.ai files.
+track.py — corner detection.
 
-Shared between server.py (MCP tool) and export.py (dashboard build).
-Requires AC_ROOT to be set. Returns an empty list if the file is missing
-or AC_ROOT is not configured — callers degrade gracefully with no corner summary.
+Primary method: detect corners from telemetry samples aggregated across
+multiple laps. This works for any track without needing AC_ROOT.
+
+Fallback (legacy): parse fast_lane.ai from AC installation. Only used if
+AC_ROOT is set and the telemetry-based detection produces no results.
 """
 
 import re
@@ -17,16 +19,131 @@ import numpy as np
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_corners(track_id: str, ac_root: Path | None) -> list[dict]:
+def get_corners(track_id: str, ac_root: Path | None, laps_samples: list[list[dict]] | None = None) -> list[dict]:
     """
-    Return a corner list for *track_id* in the shape expected by export.py:
+    Return a corner list in the shape:
         [{"name": str, "display": str, "start_m": float, "apex_m": float, "end_m": float}]
 
-    Requires AC_ROOT. Returns [] if AC_ROOT is not set or fast_lane.ai is missing.
+    Detection order:
+      1. Telemetry-based detection if laps_samples provided (preferred)
+      2. fast_lane.ai from AC installation if ac_root is set (legacy fallback)
+      3. Empty list — callers degrade gracefully
     """
-    if ac_root is None:
+    if laps_samples:
+        corners = corners_from_telemetry(laps_samples)
+        if corners:
+            return corners
+    if ac_root is not None:
+        return _corners_from_ai_file(track_id, ac_root)
+    return []
+
+
+def corners_from_telemetry(laps_samples: list[list[dict]]) -> list[dict]:
+    """
+    Detect corners by finding lateral-G regions that appear consistently
+    across multiple laps.
+
+    Real corners produce sustained |lat_g| on every lap; one-off mistakes
+    don't repeat consistently. The apex is where |lat_g| peaks per region.
+
+    laps_samples: list of sample lists, each from _fetch_lap_telemetry().
+    Returns corner list sorted by track position.
+    """
+    if not laps_samples:
         return []
-    return _corners_from_ai_file(track_id, ac_root)
+
+    # Collect (start_m, apex_m, end_m) regions from every lap
+    all_apexes: list[float] = []
+    all_regions: list[tuple[float, float, float]] = []
+    for samples in laps_samples:
+        for region in _find_corner_regions(samples):
+            all_apexes.append(region[1])
+            all_regions.append(region)
+
+    if not all_apexes:
+        return []
+
+    # Cluster apexes within CLUSTER_WINDOW_M of each other
+    CLUSTER_WINDOW_M = 40.0
+    MIN_LAP_FRACTION = 0.4
+
+    sorted_apexes = sorted(range(len(all_apexes)), key=lambda i: all_apexes[i])
+    clusters: list[list[int]] = []
+    current: list[int] = [sorted_apexes[0]]
+
+    for idx in sorted_apexes[1:]:
+        if all_apexes[idx] - all_apexes[current[-1]] <= CLUSTER_WINDOW_M:
+            current.append(idx)
+        else:
+            clusters.append(current)
+            current = [idx]
+    clusters.append(current)
+
+    n_laps = len(laps_samples)
+    result = []
+    for cluster in clusters:
+        if len(cluster) < max(1, n_laps * MIN_LAP_FRACTION):
+            continue
+        apex_m  = float(np.median([all_apexes[i] for i in cluster]))
+        start_m = float(np.median([all_regions[i][0] for i in cluster]))
+        end_m   = float(np.median([all_regions[i][2] for i in cluster]))
+        result.append({
+            "start_m": round(max(0.0, start_m), 1),
+            "apex_m":  round(apex_m, 1),
+            "end_m":   round(end_m, 1),
+        })
+
+    result.sort(key=lambda c: c["start_m"])
+    for n, c in enumerate(result, start=1):
+        c["name"]    = f"T{n}"
+        c["display"] = f"T{n}"
+
+    return result
+
+
+def _find_corner_regions(
+    samples: list[dict],
+    lat_g_threshold: float = 0.3,
+    min_length_m: float = 10.0,
+) -> list[tuple[float, float, float]]:
+    """
+    Find regions of sustained lateral G in a single lap.
+    Returns list of (start_m, apex_m, end_m) tuples.
+    """
+    if len(samples) < 10:
+        return []
+
+    dists  = np.array([s["lap_distance_m"] for s in samples])
+    lat_gs = np.abs(np.array([s["lat_g"] or 0.0 for s in samples]))
+
+    in_corner   = False
+    corner_start_idx = 0
+    regions = []
+
+    for i, (g, d) in enumerate(zip(lat_gs, dists)):
+        if not in_corner and g >= lat_g_threshold:
+            in_corner = True
+            corner_start_idx = i
+        elif in_corner and g < lat_g_threshold:
+            in_corner = False
+            start_m = float(dists[corner_start_idx])
+            end_m   = float(d)
+            if end_m - start_m < min_length_m:
+                continue
+            seg_lat = lat_gs[corner_start_idx:i]
+            apex_idx = corner_start_idx + int(np.argmax(seg_lat))
+            regions.append((start_m, float(dists[apex_idx]), end_m))
+
+    # Handle corner still open at end of lap
+    if in_corner:
+        start_m = float(dists[corner_start_idx])
+        end_m   = float(dists[-1])
+        if end_m - start_m >= min_length_m:
+            seg_lat = lat_gs[corner_start_idx:]
+            apex_idx = corner_start_idx + int(np.argmax(seg_lat))
+            regions.append((start_m, float(dists[apex_idx]), end_m))
+
+    return regions
 
 
 # ---------------------------------------------------------------------------
