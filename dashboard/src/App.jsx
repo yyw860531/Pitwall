@@ -77,7 +77,7 @@ export default function App() {
 
   const loadData = () => {
     setLoading(true)
-    fetch('/dashboard.json')
+    fetch('/dashboard.json?t=' + Date.now())
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(d => {
         setData(d)
