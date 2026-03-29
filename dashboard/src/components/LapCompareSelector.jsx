@@ -53,7 +53,11 @@ export default function LapCompareSelector({
   const specialOptions = [
     theoreticalBestTrace && {
       value: '__theoretical__',
-      label: `Theoretical best — ${fmtMs(theoreticalBestTrace.lap_time_ms)} (S1 L${theoreticalBestTrace.best_s1_lap_number} + S2 L${theoreticalBestTrace.best_s2_lap_number})`,
+      label: `Theoretical best — ${fmtMs(theoreticalBestTrace.lap_time_ms)} (${
+        [1, 2, 3].filter(i => theoreticalBestTrace[`best_s${i}_lap_number`])
+          .map(i => `S${i} L${theoreticalBestTrace[`best_s${i}_lap_number`]}`)
+          .join(' + ')
+      })`,
     },
   ].filter(Boolean)
 

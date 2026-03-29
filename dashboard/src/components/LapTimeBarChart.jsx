@@ -27,6 +27,7 @@ function CustomTooltip({ active, payload }) {
       {d.sectors.s1_ms && (
         <div style={{ color: '#64748b', marginTop: 4 }}>
           S1 {fmtMs(d.sectors.s1_ms)} · S2 {fmtMs(d.sectors.s2_ms)}
+          {d.sectors.s3_ms ? ` · S3 ${fmtMs(d.sectors.s3_ms)}` : ''}
         </div>
       )}
       {!d.is_valid && <div style={{ color: '#ef4444', marginTop: 4 }}>INVALID</div>}

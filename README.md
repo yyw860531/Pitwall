@@ -28,7 +28,7 @@ After each session, PitWall:
 4. **Delivers** a prioritised coaching report: the biggest problem first, specific numbers, actionable fixes
 5. **Renders** everything in a visual dashboard — speed traces, input overlays, corner delta tables
 
-**Current setup:** Abarth 500 SS · Vallelunga Club · chasing 2 seconds
+**Works with any car and any track in Assetto Corsa** — no per-track configuration needed. Just drive, export, and analyse.
 
 ---
 
@@ -138,10 +138,21 @@ PITWALL_VALID_LAP_MAX_MS=120000
 # Ingest a session and generate coaching report
 python scripts/run_session.py data/sessions/your_session.ld
 
+# Data-only export (skip AI agents — much faster)
+python scripts/run_session.py data/sessions/your_session.ld --no-agents
+
+# Re-run analysis on a previously ingested session
+python scripts/run_session.py --session-id 28032026-155415
+
+# List all ingested sessions
+python scripts/run_session.py --list
+
 # Start the dashboard
 cd dashboard && npm run dev
 # Open http://localhost:5173
 ```
+
+> **Tip:** Drive at least 3–4 clean laps per session. PitWall needs multiple laps to detect corners from lateral-G patterns, compute a meaningful theoretical best, and compare your best against a reference.
 
 ---
 
@@ -149,11 +160,13 @@ cd dashboard && npm run dev
 
 ### 1. Ingest (`.ld` → SQLite)
 
-`ingest.py` uses [ldparser](https://github.com/gotzl/ldparser) to parse MoTeC binary files exported by Telemetrick. It extracts all laps, stores sample-by-sample telemetry at 30Hz, and computes sector times at the 580m mark.
+`ingest.py` uses [ldparser](https://github.com/gotzl/ldparser) to parse MoTeC binary files exported by Telemetrick. It extracts all laps, stores sample-by-sample telemetry at 30Hz, and computes sector times using real sector boundaries from AC's `sections.ini` (supporting 2 or 3 sectors depending on the track).
 
 Channels stored: `Ground Speed`, `Throttle Pos`, `Brake Pos`, `Steering Angle`, `Gear`, `Engine RPM`, `Lap Distance`, `CG Accel Lateral`, `CG Accel Longitudinal`.
 
-Lap validity is determined by the `Lap Invalidated` channel if present, otherwise by a configurable time-range heuristic (30s–120s).
+Track length is derived from telemetry data (maximum lap distance), so no per-track configuration is needed.
+
+Lap validity is determined by the `Lap Invalidated` channel if present, otherwise by a dynamic heuristic based on venue length (minimum speed floor of 30 kph). Falls back to configurable time-range (30s–120s) if venue length is unknown.
 
 ### 2. MCP Server (data layer)
 
@@ -165,8 +178,8 @@ Lap validity is determined by the `Lap Invalidated` channel if present, otherwis
 | `list_laps(session_id)` | Laps with metadata for a session |
 | `get_lap_trace(lap_id, channels, start_m, end_m)` | Raw samples for a distance range |
 | `get_session_metadata(session_id)` | Car specs, gear ratios, fastest lap |
-| `get_ac_car_data(car_id)` | Physics parameters from AC installation |
-| `get_ac_track_line(track_id)` | Track geometry + auto-detected corner map |
+| `get_ac_car_data(car_id)` | Physics parameters from AC installation (tyre grip, aero, drivetrain) |
+| `get_ac_track_line(track_id)` | Track geometry + auto-detected corner map (handles multi-layout tracks) |
 
 ### 3. Agent pipeline
 
@@ -183,10 +196,12 @@ Lap validity is determined by the `Lap Invalidated` channel if present, otherwis
 
 React + Vite + Recharts. Reads `dashboard.json` produced by `export.py`.
 
-Five views:
-- **Session overview** — lap time bar chart, best vs. target vs. reference
-- **Speed trace overlay** — best lap vs. reference, corner zones shaded
+Features:
+- **Session overview** — lap time bar chart with theoretical best reference line, sector splits (S1/S2/S3)
+- **Lap comparison selector** — compare any two laps head-to-head, or compare against the theoretical best (stitched from best sector times)
+- **Speed trace overlay** — best lap vs. reference with aligned X-axis
 - **Throttle / brake trace** — input overlay, shows early braking and late throttle
+- **Track map** — auto-detected from AC installation (supports multi-layout tracks like Red Bull Ring)
 - **Corner summary table** — delta per corner, colour-coded, sorted by time loss
 - **Coaching panel** — full report from Claude, priority corners highlighted
 
@@ -205,10 +220,11 @@ PitWall/
 ├── db/
 │   └── pitwall.db               # SQLite (gitignored)
 ├── pitwall/
-│   ├── ingest.py                # .ld → SQLite
+│   ├── ingest.py                # .ld → SQLite (N-sector support)
 │   ├── server.py                # FastMCP server — 6 data tools
 │   ├── orchestrator.py          # Coordinates all agents via Claude Agent SDK
 │   ├── export.py                # DB → dashboard.json
+│   ├── track.py                 # Corner detection + AC track/sector parsing
 │   └── agents/
 │       ├── data_gatherer.py     # MCP-connected data fetch agent
 │       ├── corner_analysis.py
@@ -239,7 +255,8 @@ PitWall/
             ├── SpeedTraceChart.jsx
             ├── InputTraceChart.jsx
             ├── CornerSummaryTable.jsx
-            └── CoachingPanel.jsx
+            ├── CoachingPanel.jsx
+            └── LapCompareSelector.jsx
 ```
 
 ---
@@ -251,7 +268,7 @@ PitWall/
 | `ANTHROPIC_API_KEY` | **Yes** | — | Your Anthropic API key |
 | `CLAUDE_MODEL` | No | `claude-sonnet-4-6` | Model for reasoning/language agents (coaching writer, data gatherer, synthetic lap) |
 | `CLAUDE_MODEL_FAST` | No | `claude-haiku-4-5` | Model for calculation-only agents (corner analysis, braking, balance). Haiku is ~20× cheaper for structured JSON tasks |
-| `AC_ROOT` | No | — | Path to your AC installation. Required for synthetic reference laps |
+| `AC_ROOT` | No | — | Path to your AC installation. Enables track map, real sector boundaries, synthetic reference laps |
 | `TELEMETRY_EXPORT_DIR` | No | — | Root of your Telemetrick export folder. Enables session auto-discovery |
 | `PITWALL_DB_PATH` | No | `db/pitwall.db` | SQLite database path |
 | `PITWALL_DATA_DIR` | No | `data/sessions` | Session files directory |
@@ -284,10 +301,15 @@ PitWall/
 
 ## Roadmap
 
-- [ ] External reference lap — import a coach's driven lap or AC AI ghost (`.ld`) as a cross-session benchmark; enables `set_reference_lap.py`
+- [ ] External reference lap — import a faster driver's `.ld` or AC AI ghost as a cross-session benchmark
 - [ ] Multi-session progress tracking ("T4 improved 0.3s over 3 sessions")
 - [ ] Voice coaching between laps (text-to-speech via Coaching Writer)
 - [ ] Web UI with live MCP connection
+- [x] Any car, any track support — no per-track hardcoding
+- [x] Real sector boundaries from AC `sections.ini` (2 or 3 sectors)
+- [x] Corner detection from lateral-G telemetry (no AI file needed)
+- [x] Lap comparison selector with theoretical best trace
+- [x] Track map auto-detection (multi-layout tracks supported)
 
 ---
 

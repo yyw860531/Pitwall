@@ -1,5 +1,5 @@
 """
-track.py — corner detection.
+track.py — corner detection and AC track data parsing.
 
 Primary method: detect corners from telemetry samples aggregated across
 multiple laps. This works for any track without needing AC_ROOT.
@@ -8,6 +8,7 @@ Fallback (legacy): parse fast_lane.ai from AC installation. Only used if
 AC_ROOT is set and the telemetry-based detection produces no results.
 """
 
+import configparser
 import re
 import struct
 from pathlib import Path
@@ -191,6 +192,72 @@ def _emit_region(
             if e - s >= min_length_m:
                 apex_idx = sub_start + int(np.argmax(sub_seg))
                 regions.append((s, float(dists[apex_idx]), e))
+
+
+# ---------------------------------------------------------------------------
+# AC sections.ini — real sector boundaries
+# ---------------------------------------------------------------------------
+
+def read_sectors(sections_ini_path: Path, track_length_m: float) -> list[float]:
+    """
+    Parse AC sections.ini and return sector boundary distances in metres.
+
+    sections.ini defines sectors as normalised positions (0.0–1.0):
+        [SECTION_0]
+        IN=0.0
+        OUT=0.35
+        [SECTION_1]
+        IN=0.35
+        OUT=0.72
+        ...
+
+    Returns a list of boundary distances (the OUT of each sector except the last).
+    For 3 sectors this returns [b1_m, b2_m] — two boundaries.
+    Returns [] if the file can't be parsed.
+    """
+    if not sections_ini_path or not sections_ini_path.exists():
+        return []
+    if track_length_m <= 0:
+        return []
+
+    try:
+        cp = configparser.ConfigParser(strict=False)
+        cp.read(str(sections_ini_path))
+
+        # Collect (index, OUT) pairs from SECTION_N entries
+        sections = []
+        for section in cp.sections():
+            m = re.match(r"SECTION[_\s]*(\d+)", section, re.IGNORECASE)
+            if not m:
+                continue
+            idx = int(m.group(1))
+            out_val = None
+            for key in ("OUT", "out", "Out"):
+                try:
+                    out_val = float(cp[section][key])
+                    break
+                except (KeyError, ValueError):
+                    pass
+            if out_val is not None:
+                sections.append((idx, out_val))
+
+        if len(sections) < 2:
+            return []
+
+        sections.sort(key=lambda x: x[0])
+
+        # Boundaries are the OUT values of all sectors except the last
+        # (the last sector's OUT is 1.0 = finish line)
+        boundaries = []
+        for idx, out_norm in sections[:-1]:
+            boundary_m = round(out_norm * track_length_m, 1)
+            if 0 < boundary_m < track_length_m:
+                boundaries.append(boundary_m)
+
+        return boundaries
+
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------

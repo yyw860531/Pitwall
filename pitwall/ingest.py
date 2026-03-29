@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     sector_count        INTEGER DEFAULT 2,
     sector_boundary_m   REAL,
     venue_length_m      REAL,
+    sector_boundaries_json TEXT,
     coaching_report_json TEXT
 );
 
@@ -238,27 +239,39 @@ def compute_lap_time_ms(lap_time_ch: np.ndarray, mask: np.ndarray) -> int:
     return int(round(float(lap_times.max()) * 1000))
 
 
-def compute_sector_time(lap_distance_ch: np.ndarray, lap_time_ch: np.ndarray,
-                         mask: np.ndarray, boundary_m: float) -> tuple[int | None, int | None]:
+def compute_sector_times(
+    lap_distance_ch: np.ndarray,
+    lap_time_ch: np.ndarray,
+    mask: np.ndarray,
+    boundaries_m: list[float],
+) -> list[int | None]:
     """
-    Compute S1 and S2 times given a distance boundary.
-    S1 ends at first sample where lap_distance >= boundary_m.
-    Returns (s1_ms, s2_ms) or (None, None) if boundary not found.
+    Compute sector times for N sectors defined by distance boundaries.
+
+    boundaries_m: list of 1 or 2 boundary distances (for 2 or 3 sectors).
+    Returns [s1_ms, s2_ms] or [s1_ms, s2_ms, s3_ms]. None if boundary not crossed.
     """
     dist = lap_distance_ch[mask]
     times = lap_time_ch[mask]
     if len(dist) == 0:
-        return None, None
+        return [None] * (len(boundaries_m) + 1)
 
-    crossing = np.where(dist >= boundary_m)[0]
-    if len(crossing) == 0:
-        return None, None
+    # Find the time at each boundary crossing
+    split_times_s = [0.0]  # start of lap
+    for boundary in sorted(boundaries_m):
+        crossing = np.where(dist >= boundary)[0]
+        if len(crossing) == 0:
+            return [None] * (len(boundaries_m) + 1)
+        split_times_s.append(float(times[crossing[0]]))
+    split_times_s.append(float(times.max()))  # end of lap
 
-    s1_time_s = float(times[crossing[0]])
-    lap_total_s = float(times.max())
-    s1_ms = int(round(s1_time_s * 1000))
-    s2_ms = int(round((lap_total_s - s1_time_s) * 1000))
-    return s1_ms, s2_ms
+    # Compute deltas between consecutive splits
+    sector_times = []
+    for i in range(len(split_times_s) - 1):
+        delta_s = split_times_s[i + 1] - split_times_s[i]
+        sector_times.append(int(round(delta_s * 1000)))
+
+    return sector_times
 
 
 def check_lap_invalid(ld: ldparser.ldData, lap_mask_30hz: np.ndarray) -> bool:
@@ -300,6 +313,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE sessions ADD COLUMN sector_boundary_m REAL")
     if "venue_length_m" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN venue_length_m REAL")
+    if "sector_boundaries_json" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN sector_boundaries_json TEXT")
     conn.commit()
     log.info("Database ready: %s", db_path)
     return conn
@@ -395,16 +410,37 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     # --- Insert session ---
     # fastest_lap in .ldx is 1-indexed; store as 1-indexed
     venue_length_m = ldx.get("venue_length_m")
-    sector_boundary_m = venue_length_m / 2 if venue_length_m else None
+
+    # Try to read real sector boundaries from AC sections.ini
+    import json as _json
+    sector_boundaries: list[float] = []
+    if config.ac_root is not None and venue_length_m:
+        from pitwall.server import _find_ac_track_file
+        from pitwall.track import read_sectors
+        tracks_dir = config.ac_root / "content" / "tracks"
+        sections_path = _find_ac_track_file(tracks_dir, meta["track"], "data", "sections.ini")
+        sector_boundaries = read_sectors(sections_path, venue_length_m)
+        if sector_boundaries:
+            log.info("Read %d sector boundaries from AC: %s",
+                     len(sector_boundaries), sector_boundaries)
+
+    # Fallback: split at midpoint (2 sectors)
+    if not sector_boundaries and venue_length_m:
+        sector_boundaries = [venue_length_m / 2]
+
+    sector_count = len(sector_boundaries) + 1
+    # Keep sector_boundary_m for backwards compat (first boundary)
+    sector_boundary_m = sector_boundaries[0] if sector_boundaries else None
 
     conn.execute(
         """INSERT INTO sessions
            (session_id, car, track, date, driver, fastest_lap, fastest_time_ms,
-            sector_count, sector_boundary_m, venue_length_m)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?, ?)""",
+            sector_count, sector_boundary_m, venue_length_m, sector_boundaries_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (session_id, meta["car"], meta["track"], date_fmt, meta["driver"],
          ldx["fastest_lap"], ldx["fastest_time_ms"],
-         sector_boundary_m, venue_length_m)
+         sector_count, sector_boundary_m, venue_length_m,
+         _json.dumps(sector_boundaries) if sector_boundaries else None)
     )
 
     # --- Dynamic lap validity window ---
@@ -437,23 +473,26 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
         )
         is_best = (file_pos == ldx["fastest_lap"])
 
-        s1_ms, s2_ms = None, None
-        if is_valid and sector_boundary_m:
-            s1_ms, s2_ms = compute_sector_time(
-                lap_distance_ch, lap_time_ch, mask, sector_boundary_m
+        s1_ms, s2_ms, s3_ms = None, None, None
+        if is_valid and sector_boundaries:
+            sector_times = compute_sector_times(
+                lap_distance_ch, lap_time_ch, mask, sector_boundaries
             )
+            s1_ms = sector_times[0] if len(sector_times) > 0 else None
+            s2_ms = sector_times[1] if len(sector_times) > 1 else None
+            s3_ms = sector_times[2] if len(sector_times) > 2 else None
 
-        log.info("  Lap %d: %dms  valid=%s  best=%s  s1=%s s2=%s",
-                 lap_number_1indexed, lap_time_ms, is_valid, is_best, s1_ms, s2_ms)
+        log.info("  Lap %d: %dms  valid=%s  best=%s  s1=%s s2=%s s3=%s",
+                 lap_number_1indexed, lap_time_ms, is_valid, is_best, s1_ms, s2_ms, s3_ms)
 
         conn.execute(
             """INSERT INTO laps
                (lap_id, session_id, lap_number, lap_time_ms,
                 is_valid, is_best, is_reference, is_synthetic,
                 s1_ms, s2_ms, s3_ms)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, NULL)""",
+               VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)""",
             (lap_id, session_id, lap_number_1indexed, lap_time_ms,
-             int(is_valid), int(is_best), s1_ms, s2_ms)
+             int(is_valid), int(is_best), s1_ms, s2_ms, s3_ms)
         )
 
         # --- Store telemetry samples ---

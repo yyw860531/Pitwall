@@ -242,37 +242,49 @@ def get_session_metadata(session_id: str) -> dict:
             return {"error": "session_id not found", "code": "NOT_FOUND"}
 
         laps = conn.execute(
-            """SELECT lap_number, lap_time_ms, is_valid, is_best, is_reference,
-                      s1_ms, s2_ms
+            """SELECT lap_number, lap_id, lap_time_ms, is_valid, is_best, is_reference,
+                      s1_ms, s2_ms, s3_ms
                FROM laps WHERE session_id = ? ORDER BY lap_number""",
             (session_id,),
         ).fetchall()
 
-        valid_times = [r["lap_time_ms"] for r in laps if r["is_valid"]]
-        best_s1 = min((r["s1_ms"] for r in laps if r["s1_ms"] is not None), default=None)
-        best_s2 = min((r["s2_ms"] for r in laps if r["s2_ms"] is not None), default=None)
-        theoretical_best_ms = (best_s1 + best_s2) if (best_s1 and best_s2) else None
-
-        best_s1_row = conn.execute(
-            "SELECT lap_id FROM laps WHERE session_id=? AND s1_ms IS NOT NULL AND is_valid=1 ORDER BY s1_ms LIMIT 1",
-            (session_id,)
-        ).fetchone()
-        best_s2_row = conn.execute(
-            "SELECT lap_id FROM laps WHERE session_id=? AND s2_ms IS NOT NULL AND is_valid=1 ORDER BY s2_ms LIMIT 1",
-            (session_id,)
-        ).fetchone()
-
         session_dict = dict(session)
-        # Backwards-compat: old rows pre-date the sector_boundary_m column
-        # Leave as None — callers handle missing sector data gracefully
+
+        # Determine sector count from session metadata
+        sector_boundaries_json = session_dict.get("sector_boundaries_json")
+        n_sectors = session_dict.get("sector_count") or 2
+        if sector_boundaries_json:
+            import json as _json
+            try:
+                n_sectors = len(_json.loads(sector_boundaries_json)) + 1
+            except (ValueError, TypeError):
+                pass
+
+        valid_times = [r["lap_time_ms"] for r in laps if r["is_valid"]]
+        sector_keys = [f"s{i+1}_ms" for i in range(min(n_sectors, 3))]
+
+        # Theoretical best = sum of individual sector bests
+        best_sectors = []
+        for key in sector_keys:
+            best_val = min((r[key] for r in laps if r[key] is not None), default=None)
+            best_sectors.append(best_val)
+        theoretical_best_ms = sum(best_sectors) if all(s is not None for s in best_sectors) else None
+
+        # Best lap per sector (for sector-best reference in agents)
+        best_sector_lap_ids = {}
+        for i, key in enumerate(sector_keys):
+            row = conn.execute(
+                f"SELECT lap_id FROM laps WHERE session_id=? AND {key} IS NOT NULL AND is_valid=1 ORDER BY {key} LIMIT 1",
+                (session_id,)
+            ).fetchone()
+            best_sector_lap_ids[f"best_s{i+1}_lap_id"] = row["lap_id"] if row else None
 
         return {
             **session_dict,
             "lap_count": len(laps),
             "valid_lap_count": len(valid_times),
             "theoretical_best_ms": theoretical_best_ms,
-            "best_s1_lap_id": best_s1_row["lap_id"] if best_s1_row else None,
-            "best_s2_lap_id": best_s2_row["lap_id"] if best_s2_row else None,
+            **best_sector_lap_ids,
             "laps": [dict(r) for r in laps],
         }
     finally:

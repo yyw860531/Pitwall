@@ -322,32 +322,50 @@ def _build_all_lap_traces(
 def _build_theoretical_best_trace(
     conn: sqlite3.Connection,
     laps: list[dict],
-    sector_boundary_m: float,
+    sector_boundaries: list[float],
     n_points: int = SPEED_TRACE_POINTS,
 ) -> dict | None:
     """
-    Stitch together the best-S1 lap (distance < boundary) and best-S2 lap
-    (distance >= boundary) to produce a theoretical best speed trace.
+    Stitch together the best sector laps to produce a theoretical best trace.
+    Supports 2 or 3 sectors (1 or 2 boundaries).
     Returns None if sector data is unavailable.
     """
-    if sector_boundary_m is None:
+    if not sector_boundaries:
         return None
-    valid = [l for l in laps if l["is_valid"] and l["s1_ms"] and l["s2_ms"]]
+
+    sector_keys = ["s1_ms", "s2_ms", "s3_ms"]
+    n_sectors = len(sector_boundaries) + 1
+
+    # Find laps with all required sector times
+    valid = [l for l in laps if l["is_valid"]]
+    valid = [l for l in valid if all(l.get(sector_keys[i]) for i in range(n_sectors))]
     if not valid:
         return None
 
-    best_s1_lap = min(valid, key=lambda l: l["s1_ms"])
-    best_s2_lap = min(valid, key=lambda l: l["s2_ms"])
+    # Find the best lap for each sector
+    best_sector_laps = []
+    for i in range(n_sectors):
+        key = sector_keys[i]
+        best_sector_laps.append(min(valid, key=lambda l, k=key: l[k]))
 
-    s1_samples = [
-        s for s in _fetch_lap_telemetry(conn, best_s1_lap["lap_id"])
-        if s["lap_distance_m"] < sector_boundary_m
-    ]
-    s2_samples = [
-        s for s in _fetch_lap_telemetry(conn, best_s2_lap["lap_id"])
-        if s["lap_distance_m"] >= sector_boundary_m
-    ]
-    all_samples = s1_samples + s2_samples
+    # Build distance ranges for each sector: [0, b1], [b1, b2], [b2, ∞]
+    bounds = [0.0] + sorted(sector_boundaries) + [float("inf")]
+
+    # Stitch telemetry from each sector's best lap
+    all_samples = []
+    sector_info = {}
+    total_time_ms = 0
+    for i in range(n_sectors):
+        lap = best_sector_laps[i]
+        lo, hi = bounds[i], bounds[i + 1]
+        samples = [
+            s for s in _fetch_lap_telemetry(conn, lap["lap_id"])
+            if lo <= s["lap_distance_m"] < hi
+        ]
+        all_samples.extend(samples)
+        sector_info[f"best_s{i+1}_lap_number"] = lap["lap_number"]
+        total_time_ms += lap[sector_keys[i]]
+
     if len(all_samples) < 10:
         return None
 
@@ -362,9 +380,8 @@ def _build_theoretical_best_trace(
     brk_interp   = np.interp(grid, dist, brk)
 
     return {
-        "best_s1_lap_number": best_s1_lap["lap_number"],
-        "best_s2_lap_number": best_s2_lap["lap_number"],
-        "lap_time_ms": best_s1_lap["s1_ms"] + best_s2_lap["s2_ms"],
+        **sector_info,
+        "lap_time_ms": total_time_ms,
         "speed_trace": [
             {"distance_m": round(float(g), 1), "speed_kph": round(float(s), 2)}
             for g, s in zip(grid, speed_interp)
@@ -515,9 +532,25 @@ def build_dashboard(
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"]) if ref_lap else best_samples
 
         valid_laps = [l for l in laps if l["is_valid"]]
-        best_s1 = min((l["s1_ms"] for l in valid_laps if l["s1_ms"]), default=None)
-        best_s2 = min((l["s2_ms"] for l in valid_laps if l["s2_ms"]), default=None)
-        theoretical_best_ms = (best_s1 + best_s2) if (best_s1 and best_s2) else None
+
+        # Parse sector boundaries from session (N-sector support)
+        sector_boundaries_raw = session.get("sector_boundaries_json")
+        sector_boundaries: list[float] = []
+        if sector_boundaries_raw:
+            try:
+                sector_boundaries = json.loads(sector_boundaries_raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        n_sectors = len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2
+        sector_keys = ["s1_ms", "s2_ms", "s3_ms"][:n_sectors]
+
+        # Theoretical best = sum of best individual sector times
+        best_sectors = []
+        for key in sector_keys:
+            best_val = min((l[key] for l in valid_laps if l.get(key)), default=None)
+            best_sectors.append(best_val)
+        theoretical_best_ms = sum(best_sectors) if all(s is not None for s in best_sectors) else None
 
         speed_trace = _build_speed_trace(best_samples, ref_samples)
         speed_trace["best_lap_number"]      = best_lap["lap_number"]
@@ -534,23 +567,24 @@ def build_dashboard(
         corners        = get_corners(session["track"], config.ac_root, all_valid_samples)
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
-        sector_boundary_m      = session["sector_boundary_m"]
-        # Sanity check: sector boundary must be within the track's telemetry range.
-        # Old sessions defaulted to 580m (Vallelunga-specific) even for other tracks.
-        if sector_boundary_m is not None and best_samples:
+        # Sanity check: all sector boundaries must be within telemetry range
+        if sector_boundaries and best_samples:
             max_dist = max(s["lap_distance_m"] for s in best_samples)
-            if sector_boundary_m > max_dist or sector_boundary_m < max_dist * 0.1:
+            sane = all(0 < b < max_dist for b in sector_boundaries)
+            if not sane:
                 log.warning(
-                    "Sector boundary %.0fm looks wrong for track with %.0fm telemetry — ignoring",
-                    sector_boundary_m, max_dist,
+                    "Sector boundaries %s look wrong for track with %.0fm telemetry — ignoring",
+                    sector_boundaries, max_dist,
                 )
-                sector_boundary_m = None
+                sector_boundaries = []
 
         all_lap_traces         = _build_all_lap_traces(conn, laps)
-        theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
+        theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundaries)
 
-        # --- Track length: prefer lookup, fall back to telemetry max distance ---
-        track_length_m = TRACK_LENGTH_M.get(session["track"])
+        # --- Track length: venue_length from ingest > lookup table > telemetry max ---
+        track_length_m = session.get("venue_length_m")
+        if not track_length_m:
+            track_length_m = TRACK_LENGTH_M.get(session["track"])
         if track_length_m is None and best_samples:
             track_length_m = max(s["lap_distance_m"] for s in best_samples)
         if track_length_m is None:
@@ -592,9 +626,9 @@ def build_dashboard(
                 "reference_lap_number": ref_lap["lap_number"] if ref_lap else None,
                 "reference_type":       ref_type,
                 "theoretical_best_ms":  theoretical_best_ms,
-                "sector_count":         session["sector_count"],
+                "sector_count":         n_sectors,
                 "track_map_url":        track_map_url,
-                "sector_boundary_m":    sector_boundary_m,
+                "sector_boundaries":    sector_boundaries,
             },
             "laps": [
                 {
@@ -604,7 +638,7 @@ def build_dashboard(
                     "is_best":      bool(l["is_best"]),
                     "is_reference": bool(l["is_reference"]),
                     "is_synthetic": bool(l["is_synthetic"]),
-                    "sectors": {"s1_ms": l["s1_ms"], "s2_ms": l["s2_ms"], "s3_ms": None},
+                    "sectors": {"s1_ms": l["s1_ms"], "s2_ms": l["s2_ms"], "s3_ms": l.get("s3_ms")},
                 }
                 for l in laps
             ],
