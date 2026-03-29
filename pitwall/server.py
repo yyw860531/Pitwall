@@ -501,6 +501,77 @@ async def api_analyse(request):
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _start_file_watcher():
+    """
+    Start the telemetry file watcher in a background thread if
+    TELEMETRY_EXPORT_DIR is configured. Silently skips if watchdog is not
+    installed or the directory doesn't exist.
+    """
+    if config.telemetry_export_dir is None:
+        return
+    watch_dir = config.telemetry_export_dir
+    if not watch_dir.exists():
+        log.warning("TELEMETRY_EXPORT_DIR does not exist, watcher not started: %s", watch_dir)
+        return
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+    except ImportError:
+        log.warning("watchdog not installed — auto-ingest disabled. Run: pip install watchdog")
+        return
+
+    import threading
+    import time
+    from pitwall.ingest import ingest
+
+    class _Handler(FileSystemEventHandler):
+        def __init__(self):
+            self._pending: set[Path] = set()
+            self._lock = threading.Lock()
+
+        def _add(self, path: Path):
+            if path.suffix.lower() == ".ld":
+                with self._lock:
+                    self._pending.add(path)
+
+        def on_created(self, event):
+            if not event.is_directory:
+                self._add(Path(event.src_path))
+
+        def on_modified(self, event):
+            if not event.is_directory:
+                self._add(Path(event.src_path))
+
+        def process_pending(self):
+            with self._lock:
+                to_process, self._pending = list(self._pending), set()
+            for ld_path in to_process:
+                ldx_path = ld_path.with_suffix(".ldx")
+                if not ldx_path.exists():
+                    with self._lock:
+                        self._pending.add(ld_path)  # retry next cycle
+                    continue
+                try:
+                    session_id = ingest(ld_path)
+                    log.info("Auto-ingested: %s", session_id)
+                except Exception as e:
+                    log.error("Auto-ingest failed for %s: %s", ld_path.name, e)
+
+    handler = _Handler()
+    observer = Observer()
+    observer.schedule(handler, str(watch_dir), recursive=True)
+    observer.start()
+
+    def _loop():
+        while observer.is_alive():
+            time.sleep(3)
+            handler.process_pending()
+
+    t = threading.Thread(target=_loop, daemon=True, name="telemetry-watcher")
+    t.start()
+    log.info("File watcher started: %s", watch_dir)
+
+
 if __name__ == "__main__":
     import argparse as _ap
     _parser = _ap.ArgumentParser(description="PitWall MCP server")
@@ -512,6 +583,7 @@ if __name__ == "__main__":
 
     if _args.http:
         import asyncio as _asyncio
+        _start_file_watcher()
         _asyncio.run(mcp.run_http_async(
             transport="sse",
             host="127.0.0.1",

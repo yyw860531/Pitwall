@@ -60,11 +60,17 @@ export default function SessionPicker({ currentSessionId, onSessionData }) {
   const [loadStatus, setLoadStatus] = useState('')
   const [analyseStatus, setAnalyseStatus] = useState('')
 
-  useEffect(() => {
+  const fetchSessions = () => {
     fetch('/api/sessions')
       .then(r => r.json())
       .then(setSessions)
       .catch(() => {})
+  }
+
+  useEffect(() => {
+    fetchSessions()
+    const interval = setInterval(fetchSessions, 5000)
+    return () => clearInterval(interval)
   }, [])
 
   // Keep selected in sync if parent reloads with a new session
