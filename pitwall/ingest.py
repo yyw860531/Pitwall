@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     fastest_lap         INTEGER,
     fastest_time_ms     INTEGER,
     sector_count        INTEGER DEFAULT 2,
-    sector_boundary_m   REAL DEFAULT 580.0,
+    sector_boundary_m   REAL,
     coaching_report_json TEXT
 );
 

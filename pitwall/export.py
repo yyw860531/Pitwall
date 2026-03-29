@@ -50,6 +50,8 @@ TRACK_DISPLAY: dict[str, str] = {
     "ks_monza":                      "Monza",
     "ks_silverstone":                "Silverstone",
     "ks_mugello":                    "Mugello",
+    "magione":                       "Autodromo di Magione",
+    "ks_magione":                    "Autodromo di Magione",
 }
 
 TRACK_LENGTH_M: dict[str, float] = {
@@ -521,6 +523,17 @@ def build_dashboard(
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
         sector_boundary_m      = session["sector_boundary_m"]
+        # Sanity check: sector boundary must be within the track's telemetry range.
+        # Old sessions defaulted to 580m (Vallelunga-specific) even for other tracks.
+        if sector_boundary_m is not None and best_samples:
+            max_dist = max(s["lap_distance_m"] for s in best_samples)
+            if sector_boundary_m > max_dist or sector_boundary_m < max_dist * 0.1:
+                log.warning(
+                    "Sector boundary %.0fm looks wrong for track with %.0fm telemetry — ignoring",
+                    sector_boundary_m, max_dist,
+                )
+                sector_boundary_m = None
+
         all_lap_traces         = _build_all_lap_traces(conn, laps)
         theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
 

@@ -228,8 +228,7 @@ def get_session_metadata(session_id: str) -> dict:
 
         session_dict = dict(session)
         # Backwards-compat: old rows pre-date the sector_boundary_m column
-        if session_dict.get("sector_boundary_m") is None:
-            session_dict["sector_boundary_m"] = 580.0
+        # Leave as None — callers handle missing sector data gracefully
 
         return {
             **session_dict,
