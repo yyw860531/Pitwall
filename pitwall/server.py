@@ -436,21 +436,21 @@ async def api_scan(request):
 
 @mcp.custom_route("/api/export/{session_id}", methods=["POST"])
 async def api_export(request):
-    """Export a specific session to dashboard.json."""
-    from pitwall.export import export
+    """Return full dashboard data for a session directly as JSON."""
+    from pitwall.export import build_dashboard
     session_id = request.path_params.get("session_id", "")
     try:
-        out = export(session_id)
-        return JSONResponse({"status": "ok", "output": str(out)})
-    except ValueError as e:
-        return JSONResponse({"error": str(e)})
+        dashboard = build_dashboard(session_id)
+        return JSONResponse(dashboard)
+    except Exception as e:
+        log.error("Export failed for %s: %s", session_id, e)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @mcp.custom_route("/api/analyse/{session_id}", methods=["POST"])
 async def api_analyse(request):
-    """Run the full AI agent pipeline for a session and re-export dashboard.json."""
+    """Run the full AI agent pipeline and return the updated dashboard data."""
     import asyncio
-    from pitwall.export import export
 
     session_id = request.path_params.get("session_id", "")
 
@@ -458,20 +458,19 @@ async def api_analyse(request):
         return JSONResponse({"error": "ANTHROPIC_API_KEY not configured"}, status_code=400)
 
     def _run():
-        import sqlite3 as _sqlite3
         from pitwall.orchestrator import orchestrate
-        from pitwall.export import _build_corner_summary, _fetch_lap_telemetry
+        from pitwall.export import build_dashboard, _build_corner_summary, _fetch_lap_telemetry
         from pitwall.track import get_corners
+        import sqlite3 as _sqlite3
 
         conn = _sqlite3.connect(str(config.db_path))
         conn.row_factory = _sqlite3.Row
         session_row = conn.execute(
             "SELECT * FROM sessions WHERE session_id=?", (session_id,)
         ).fetchone()
-        laps_rows = conn.execute(
+        laps = [dict(r) for r in conn.execute(
             "SELECT * FROM laps WHERE session_id=? ORDER BY lap_number", (session_id,)
-        ).fetchall()
-        laps = [dict(r) for r in laps_rows]
+        ).fetchall()]
         best_lap = next((l for l in laps if l["is_best"]), None)
         ref_lap  = next((l for l in laps if l.get("is_reference")), None)
         if ref_lap is None:
@@ -487,13 +486,12 @@ async def api_analyse(request):
         conn.close()
 
         coaching_report = orchestrate(session_id, corner_summary)
-        out_path = export(session_id, coaching_report=coaching_report)
-        return str(out_path)
+        return build_dashboard(session_id, coaching_report)
 
     try:
         loop = asyncio.get_event_loop()
-        out_path = await loop.run_in_executor(None, _run)
-        return JSONResponse({"status": "ok", "output": out_path})
+        dashboard = await loop.run_in_executor(None, _run)
+        return JSONResponse(dashboard)
     except Exception as e:
         log.error("Analysis failed for %s: %s", session_id, e)
         return JSONResponse({"error": str(e)}, status_code=500)

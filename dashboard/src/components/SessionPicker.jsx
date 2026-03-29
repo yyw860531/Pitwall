@@ -54,7 +54,7 @@ const S = {
   statusGreen: { fontSize: '11px', color: '#86efac' },
 }
 
-export default function SessionPicker({ currentSessionId, onSessionLoaded }) {
+export default function SessionPicker({ currentSessionId, onSessionData }) {
   const [sessions, setSessions]     = useState([])
   const [selected, setSelected]     = useState(currentSessionId || '')
   const [loadStatus, setLoadStatus] = useState('')
@@ -74,16 +74,16 @@ export default function SessionPicker({ currentSessionId, onSessionLoaded }) {
 
   const handleLoad = () => {
     if (!selected) return
-    setLoadStatus('Exporting…')
+    setLoadStatus('Loading…')
     fetch(`/api/export/${selected}`, { method: 'POST' })
       .then(r => r.json())
-      .then(result => {
-        if (result.error) {
-          setLoadStatus(`Error: ${result.error}`)
+      .then(data => {
+        if (data.error) {
+          setLoadStatus(`Error: ${data.error}`)
           setTimeout(() => setLoadStatus(''), 4000)
         } else {
-          setLoadStatus('Loaded. Reloading dashboard…')
-          setTimeout(() => { onSessionLoaded(); setLoadStatus('') }, 800)
+          onSessionData(data)
+          setLoadStatus('')
         }
       })
       .catch(() => {
@@ -102,8 +102,9 @@ export default function SessionPicker({ currentSessionId, onSessionLoaded }) {
           setAnalyseStatus(`Error: ${result.error}`)
           setTimeout(() => setAnalyseStatus(''), 6000)
         } else {
-          setAnalyseStatus('Analysis complete. Reloading…')
-          setTimeout(() => { onSessionLoaded(); setAnalyseStatus('') }, 1000)
+          onSessionData(result)
+          setAnalyseStatus('Analysis complete.')
+          setTimeout(() => setAnalyseStatus(''), 2000)
         }
       })
       .catch(() => {

@@ -461,41 +461,32 @@ def _resolve_coaching_report(
     }
 
 
-def export(
+def build_dashboard(
     session_id: str,
-    output_path: Path | None = None,
     coaching_report: dict | None = None,
-) -> Path:
+) -> dict:
     """
-    Build dashboard.json for a session and write it to output_path.
-    Returns the path written.
+    Build and return the dashboard dict for a session.
+    If coaching_report is provided it is saved to DB and embedded.
+    If not, the saved report is loaded from DB (if any).
     """
-    output_path = output_path or (_ROOT / "dashboard" / "public" / "dashboard.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
     conn = _db()
     try:
-        # --- Session ---
         session = conn.execute(
             "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
-
         session = dict(session)
 
-        # --- Laps ---
         laps_rows = conn.execute(
             "SELECT * FROM laps WHERE session_id = ? ORDER BY lap_number",
             (session_id,),
         ).fetchall()
         laps = [dict(r) for r in laps_rows]
 
-        # --- Identify best and reference laps ---
         best_lap = next((l for l in laps if l["is_best"]), None)
         ref_lap  = next((l for l in laps if l["is_reference"]), None)
-
-        # Fallback reference: best valid lap that isn't the best lap
         if ref_lap is None:
             valid_laps = [l for l in laps if l["is_valid"] and not l["is_best"]]
             if valid_laps:
@@ -505,68 +496,59 @@ def export(
             raise ValueError(f"No best lap found for session {session_id}")
 
         ref_type = "driven" if ref_lap else "none"
-        log.info("Best lap: %s  Reference: %s",
-                 best_lap["lap_id"], ref_lap["lap_id"] if ref_lap else "none")
 
-        # --- Telemetry ---
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"]) if ref_lap else best_samples
 
-        # --- Compute sector stats ---
         valid_laps = [l for l in laps if l["is_valid"]]
         best_s1 = min((l["s1_ms"] for l in valid_laps if l["s1_ms"]), default=None)
         best_s2 = min((l["s2_ms"] for l in valid_laps if l["s2_ms"]), default=None)
         theoretical_best_ms = (best_s1 + best_s2) if (best_s1 and best_s2) else None
 
-        # --- Build dashboard JSON ---
         speed_trace = _build_speed_trace(best_samples, ref_samples)
-        speed_trace["best_lap_number"]  = best_lap["lap_number"]
+        speed_trace["best_lap_number"]      = best_lap["lap_number"]
         speed_trace["reference_lap_number"] = ref_lap["lap_number"] if ref_lap else None
 
         input_trace = _build_input_trace(best_samples, ref_samples)
-        input_trace["best_lap_number"]  = best_lap["lap_number"]
+        input_trace["best_lap_number"]      = best_lap["lap_number"]
         input_trace["reference_lap_number"] = ref_lap["lap_number"] if ref_lap else None
 
-        corners = get_corners(session["track"], config.ac_root)
+        corners        = get_corners(session["track"], config.ac_root)
         corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
-        sector_boundary_m = session["sector_boundary_m"]
-
-        # --- Per-lap traces for the dashboard lap selector ---
-        all_lap_traces       = _build_all_lap_traces(conn, laps)
+        sector_boundary_m      = session["sector_boundary_m"]
+        all_lap_traces         = _build_all_lap_traces(conn, laps)
         theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
 
-        # --- Track map ---
-        track_map_url = None
-        if config.ac_root is not None:
-            map_src = _find_track_map(session["track"], config.ac_root)
-            if map_src and map_src.exists():
-                map_dst = output_path.parent / "track_map.png"
-                import shutil
-                shutil.copy2(str(map_src), str(map_dst))
-                track_map_url = "track_map.png"
-                log.info("Track map copied: %s", map_dst)
+        # Persist new coaching report to DB before resolving
+        if coaching_report is not None:
+            conn.execute(
+                "UPDATE sessions SET coaching_report_json = ? WHERE session_id = ?",
+                (json.dumps(coaching_report), session_id),
+            )
+            conn.commit()
+            log.info("Coaching report saved to DB for %s", session_id)
 
-        dashboard = {
-            "$schema": "pitwall-dashboard-v1",
+        return {
+            "$schema":      "pitwall-dashboard-v1",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "session": {
-                "session_id":            session["session_id"],
-                "driver":                session["driver"],
-                "car_id":                session["car"],
-                "car_display":           CAR_DISPLAY.get(session["car"], session["car"]),
-                "track_id":              session["track"],
-                "track_display":         TRACK_DISPLAY.get(session["track"], session["track"]),
-                "track_length_m":        TRACK_LENGTH_M.get(session["track"], 0.0),
-                "date":                  session["date"],
-                "best_lap_number":       best_lap["lap_number"],
-                "best_lap_time_ms":      best_lap["lap_time_ms"],
-                "reference_lap_number":  ref_lap["lap_number"] if ref_lap else None,
-                "reference_type":        ref_type,
-                "theoretical_best_ms":   theoretical_best_ms,
-                "sector_count":          session["sector_count"],
-                "track_map_url":         track_map_url,
-                "sector_boundary_m":     sector_boundary_m,
+                "session_id":           session["session_id"],
+                "driver":               session["driver"],
+                "car_id":               session["car"],
+                "car_display":          CAR_DISPLAY.get(session["car"], session["car"]),
+                "track_id":             session["track"],
+                "track_display":        TRACK_DISPLAY.get(session["track"], session["track"]),
+                "track_length_m":       TRACK_LENGTH_M.get(session["track"], 0.0),
+                "date":                 session["date"],
+                "best_lap_number":      best_lap["lap_number"],
+                "best_lap_time_ms":     best_lap["lap_time_ms"],
+                "reference_lap_number": ref_lap["lap_number"] if ref_lap else None,
+                "reference_type":       ref_type,
+                "theoretical_best_ms":  theoretical_best_ms,
+                "sector_count":         session["sector_count"],
+                "track_map_url":        None,  # only set when writing to file
+                "sector_boundary_m":    sector_boundary_m,
             },
             "laps": [
                 {
@@ -576,40 +558,49 @@ def export(
                     "is_best":      bool(l["is_best"]),
                     "is_reference": bool(l["is_reference"]),
                     "is_synthetic": bool(l["is_synthetic"]),
-                    "sectors": {
-                        "s1_ms": l["s1_ms"],
-                        "s2_ms": l["s2_ms"],
-                        "s3_ms": None,
-                    },
+                    "sectors": {"s1_ms": l["s1_ms"], "s2_ms": l["s2_ms"], "s3_ms": None},
                 }
                 for l in laps
             ],
-            "speed_trace": speed_trace,
-            "input_trace": input_trace,
-            "corner_summary": corner_summary,
-            "all_lap_traces":        all_lap_traces,
+            "speed_trace":            speed_trace,
+            "input_trace":            input_trace,
+            "corner_summary":         corner_summary,
+            "all_lap_traces":         all_lap_traces,
             "theoretical_best_trace": theoretical_best_trace,
-                "coaching_report": _resolve_coaching_report(
+            "coaching_report":        _resolve_coaching_report(
                 conn, session_id, coaching_report, ref_type,
                 theoretical_best_ms, best_lap, corner_summary,
             ),
         }
-
-        # Persist coaching report to DB if newly provided
-        if coaching_report is not None:
-            conn.execute(
-                "UPDATE sessions SET coaching_report_json = ? WHERE session_id = ?",
-                (json.dumps(coaching_report), session_id),
-            )
-            conn.commit()
-            log.info("Coaching report saved to DB for %s", session_id)
-
-        output_path.write_text(json.dumps(dashboard, indent=2))
-        log.info("Dashboard written to %s", output_path)
-        return output_path
-
     finally:
         conn.close()
+
+
+def export(
+    session_id: str,
+    output_path: Path | None = None,
+    coaching_report: dict | None = None,
+) -> Path:
+    """Build dashboard.json for a session and write it to output_path."""
+    output_path = output_path or (_ROOT / "dashboard" / "public" / "dashboard.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    dashboard = build_dashboard(session_id, coaching_report)
+
+    # Copy track map into the static dir when writing to file
+    if config.ac_root is not None:
+        track_id = dashboard["session"]["track_id"]
+        map_src  = _find_track_map(track_id, config.ac_root)
+        if map_src and map_src.exists():
+            import shutil
+            map_dst = output_path.parent / "track_map.png"
+            shutil.copy2(str(map_src), str(map_dst))
+            dashboard["session"]["track_map_url"] = "track_map.png"
+            log.info("Track map copied: %s", map_dst)
+
+    output_path.write_text(json.dumps(dashboard, indent=2))
+    log.info("Dashboard written to %s", output_path)
+    return output_path
 
 
 # ---------------------------------------------------------------------------

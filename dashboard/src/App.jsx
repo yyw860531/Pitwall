@@ -153,7 +153,12 @@ export default function App() {
 
       <SessionPicker
         currentSessionId={data?.session?.session_id}
-        onSessionLoaded={loadData}
+        onSessionData={d => {
+          setData(d)
+          const bestLap = d.laps.find(l => l.is_best)
+          setTargetLapNum(bestLap ? String(bestLap.lap_number) : null)
+          setRefLapNum('__theoretical__')
+        }}
       />
 
       <LapCompareSelector
