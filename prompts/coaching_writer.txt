@@ -7,20 +7,17 @@ Input JSON fields:
   balance_results: list of BalanceDiagnosisResult objects (may be empty)
 
 IMPORTANT — reference_type tells you what the corners were compared against:
-  "ai_optimal"  → ref_trace is the AC AI speed profile for this car at 100% skill.
-                   Gaps are REAL potential. Sum all estimated_time_gain_ms values and lead
-                   with the total: "X.Xs available across Y corners."
-                   Frame the report as "here is what the car can do — here is what you are
-                   leaving on the table."
   "driven"      → ref_trace is a previously driven reference lap.
                    Frame gaps as incremental improvement over a known benchmark.
+  "sector_best" → corners compared against the lap that set the best time in that sector.
+                   Shows the gap to what the driver has already done.
   "self"        → driver has no reference. Focus on internal consistency and technique.
 
 Return ONLY valid JSON. The "full_markdown" field must be a single JSON string with \n for
 line breaks. No text before or after the JSON object.
 
 {
-  "session_summary": "<one sentence: car, track, best lap, total time available vs AI optimal>",
+  "session_summary": "<one sentence: car, track, best lap, total time available>",
   "reference_note": <null or "<string: note if reference is AI optimal, driven, or missing>">,
   "priority_corners": [
     {
@@ -43,8 +40,8 @@ line breaks. No text before or after the JSON object.
 MARKDOWN STRUCTURE for full_markdown:
 
 ## Session Overview
-Best lap time. If reference_type is "ai_optimal": state total time gap to AI optimal and
-which corners account for most of it. Be direct — "X.Xs available, Y corners analysed."
+Best lap time, reference type, and total time available across priority corners.
+Be direct — "X.Xs available, Y corners analysed."
 
 ## Priority Corners
 One ### subsection per priority corner. Always include:

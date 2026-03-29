@@ -1,8 +1,13 @@
 """
-data_gatherer.py -- the ONLY module allowed to import from pitwall.server.
+data_gatherer.py -- the ONLY module that calls pitwall.server functions directly.
 
 Fetches all session and telemetry data needed by the analysis agents.
 Returns a SessionPayload dict.
+
+Architecture note: pitwall.server is built with FastMCP decorators so it can serve
+external clients via stdio/SSE transport. Internally, the orchestrator calls the
+server functions directly as Python to avoid transport overhead — the MCP layer is
+not used in this path.
 
 Reference lap strategy:
   When the session has sector-best data (best_s1_lap_id / best_s2_lap_id from metadata),

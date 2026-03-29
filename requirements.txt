@@ -1,11 +1,8 @@
 # Anthropic SDK + Agent SDK
 anthropic>=0.40.0
 
-# MCP server framework
+# MCP server framework (pulls in mcp SDK as a dependency)
 fastmcp>=0.4.0
-
-# MCP client (stdio transport used by orchestrator)
-mcp>=1.0.0
 
 # Data processing
 numpy>=1.26.0

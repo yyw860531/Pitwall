@@ -87,11 +87,17 @@ def main() -> None:
 
     # -------------------------------------------- Export (data only first)
     log.info("Step 2/3: Exporting base dashboard...")
-    from pitwall.export import export, _build_corner_summary, _fetch_lap_telemetry, VALLELUNGA_CORNERS
+    from pitwall.export import export, _build_corner_summary, _fetch_lap_telemetry
+    from pitwall.track import get_corners
     import sqlite3
 
     conn = sqlite3.connect(str(config.db_path))
     conn.row_factory = sqlite3.Row
+
+    session_row = conn.execute(
+        "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    session = dict(session_row) if session_row else {}
 
     laps_rows = conn.execute(
         "SELECT * FROM laps WHERE session_id = ? ORDER BY lap_number", (session_id,)
@@ -109,7 +115,8 @@ def main() -> None:
     if best_lap and ref_lap:
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])
-        corner_summary = _build_corner_summary(best_samples, ref_samples, VALLELUNGA_CORNERS)
+        corners = get_corners(session.get("track", ""), config.ac_root)
+        corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
 
     conn.close()
 
