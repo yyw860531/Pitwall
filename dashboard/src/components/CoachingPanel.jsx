@@ -115,7 +115,7 @@ export default function CoachingPanel({ report, session }) {
 
       {/* Full coaching report */}
       <div style={styles.markdown}>
-        <ReactMarkdown>{report.full_markdown}</ReactMarkdown>
+        <ReactMarkdown skipHtml>{report.full_markdown}</ReactMarkdown>
       </div>
 
       {/* Next action */}

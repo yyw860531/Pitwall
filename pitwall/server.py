@@ -72,13 +72,16 @@ def _find_ac_track_file(tracks_dir: Path, track_id: str, *subpath: str) -> Path 
         if candidate.exists():
             return candidate
 
-    # 3. Glob fallback
+    # 3. Glob fallback — validate results stay within tracks_dir
     prefix = normalised[:8] if len(normalised) > 8 else normalised
     target = str(Path(*subpath))
+    resolved_base = tracks_dir.resolve()
     for candidate in tracks_dir.glob(f"*{prefix}*/{target}"):
-        return candidate
+        if candidate.resolve().is_relative_to(resolved_base):
+            return candidate
     for candidate in tracks_dir.glob(f"*{prefix}*/*/{target}"):
-        return candidate
+        if candidate.resolve().is_relative_to(resolved_base):
+            return candidate
 
     return None
 
@@ -271,8 +274,12 @@ def get_session_metadata(session_id: str) -> dict:
         theoretical_best_ms = sum(best_sectors) if all(s is not None for s in best_sectors) else None
 
         # Best lap per sector (for sector-best reference in agents)
+        # Allowlist column names to avoid SQL injection via interpolation
+        _SECTOR_COLS = {"s1_ms", "s2_ms", "s3_ms"}
         best_sector_lap_ids = {}
         for i, key in enumerate(sector_keys):
+            if key not in _SECTOR_COLS:
+                continue
             row = conn.execute(
                 f"SELECT lap_id FROM laps WHERE session_id=? AND {key} IS NOT NULL AND is_valid=1 ORDER BY {key} LIMIT 1",
                 (session_id,)
