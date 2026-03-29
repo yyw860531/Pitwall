@@ -524,6 +524,13 @@ def build_dashboard(
         all_lap_traces         = _build_all_lap_traces(conn, laps)
         theoretical_best_trace = _build_theoretical_best_trace(conn, laps, sector_boundary_m)
 
+        # --- Track length: prefer lookup, fall back to telemetry max distance ---
+        track_length_m = TRACK_LENGTH_M.get(session["track"])
+        if track_length_m is None and best_samples:
+            track_length_m = max(s["lap_distance_m"] for s in best_samples)
+        if track_length_m is None:
+            track_length_m = 0.0
+
         # --- Track map as base64 data URI (works for both API and file paths) ---
         track_map_url = None
         if config.ac_root is not None:
@@ -553,7 +560,7 @@ def build_dashboard(
                 "car_display":          CAR_DISPLAY.get(session["car"], session["car"]),
                 "track_id":             session["track"],
                 "track_display":        TRACK_DISPLAY.get(session["track"], session["track"]),
-                "track_length_m":       TRACK_LENGTH_M.get(session["track"], 0.0),
+                "track_length_m":       track_length_m,
                 "date":                 session["date"],
                 "best_lap_number":      best_lap["lap_number"],
                 "best_lap_time_ms":     best_lap["lap_time_ms"],

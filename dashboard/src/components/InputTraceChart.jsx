@@ -123,6 +123,7 @@ function LegendSwatch({ color, dashed }) {
 // ---------------------------------------------------------------------------
 
 export default function InputTraceChart({ inputTrace, cornerSummary }) {
+  if (!inputTrace?.samples?.length) return null
   const { samples, best_lap_number, reference_lap_number } = inputTrace
 
   // Channel filter: 'both' | 'throttle' | 'brake'

@@ -34,7 +34,9 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function SpeedTraceChart({ speedTrace, cornerSummary, trackLength }) {
+  if (!speedTrace?.samples?.length) return null
   const { samples, best_lap_number, reference_lap_number } = speedTrace
+  const effectiveTrackLength = trackLength || samples[samples.length - 1]?.distance_m || 1000
 
   return (
     <div>
@@ -46,7 +48,7 @@ export default function SpeedTraceChart({ speedTrace, cornerSummary, trackLength
           <XAxis
             dataKey="distance_m"
             type="number"
-            domain={[0, trackLength]}
+            domain={[0, effectiveTrackLength]}
             tickLine={false}
             axisLine={{ stroke: '#1e293b' }}
             tick={{ fill: '#475569', fontSize: 10 }}
