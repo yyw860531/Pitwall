@@ -95,17 +95,33 @@ def corners_from_telemetry(laps_samples: list[list[dict]]) -> list[dict]:
         })
 
     result.sort(key=lambda c: c["start_m"])
-    for n, c in enumerate(result, start=1):
+
+    # Merge corners that overlap or have < 50m gap between them
+    MIN_GAP_M = 50.0
+    merged = []
+    for c in result:
+        if merged and c["start_m"] - merged[-1]["end_m"] < MIN_GAP_M:
+            # Merge: extend end, keep apex with higher lat-G (use later apex as proxy)
+            prev = merged[-1]
+            prev["end_m"] = max(prev["end_m"], c["end_m"])
+            # Keep the apex that's more central to the merged region
+            mid = (prev["start_m"] + prev["end_m"]) / 2
+            if abs(c["apex_m"] - mid) < abs(prev["apex_m"] - mid):
+                prev["apex_m"] = c["apex_m"]
+        else:
+            merged.append(c)
+
+    for n, c in enumerate(merged, start=1):
         c["name"]    = f"T{n}"
         c["display"] = f"T{n}"
 
-    return result
+    return merged
 
 
 def _find_corner_regions(
     samples: list[dict],
-    lat_g_threshold: float = 0.3,
-    min_length_m: float = 10.0,
+    lat_g_threshold: float = 0.5,
+    min_length_m: float = 30.0,
     max_corner_m: float = 300.0,
 ) -> list[tuple[float, float, float]]:
     """

@@ -75,18 +75,33 @@ export default function App() {
   const [targetLapNum, setTargetLapNum] = useState(null)
   const [refLapNum, setRefLapNum]     = useState(null)
 
+  const applyData = (d) => {
+    setData(d)
+    setLoading(false)
+    const bestLap = d.laps.find(l => l.is_best)
+    setTargetLapNum(bestLap ? String(bestLap.lap_number) : null)
+    setRefLapNum('__theoretical__')
+  }
+
   const loadData = () => {
     setLoading(true)
-    fetch('/dashboard.json?t=' + Date.now())
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(d => {
-        setData(d)
-        setLoading(false)
-        const bestLap = d.laps.find(l => l.is_best)
-        setTargetLapNum(bestLap ? String(bestLap.lap_number) : null)
-        setRefLapNum('__theoretical__')
+    // Try the API first (returns fresh data with saved coaching report),
+    // fall back to static dashboard.json for offline/CLI-only usage.
+    fetch('/api/sessions')
+      .then(r => { if (!r.ok) throw new Error(); return r.json() })
+      .then(sessions => {
+        if (!sessions.length) throw new Error('no sessions')
+        const sid = sessions[0].session_id
+        return fetch(`/api/export/${sid}`, { method: 'POST' }).then(r => r.json())
       })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .then(d => { if (d.error) throw new Error(d.error); applyData(d) })
+      .catch(() => {
+        // Fallback: static file
+        fetch('/dashboard.json?t=' + Date.now())
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+          .then(applyData)
+          .catch(e => { setError(e.message); setLoading(false) })
+      })
   }
 
   useEffect(() => { loadData() }, [])
@@ -153,12 +168,7 @@ export default function App() {
 
       <SessionPicker
         currentSessionId={data?.session?.session_id}
-        onSessionData={d => {
-          setData(d)
-          const bestLap = d.laps.find(l => l.is_best)
-          setTargetLapNum(bestLap ? String(bestLap.lap_number) : null)
-          setRefLapNum('__theoretical__')
-        }}
+        onSessionData={applyData}
       />
 
       <LapCompareSelector
