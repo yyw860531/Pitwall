@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 export.py — queries SQLite and produces dashboard/public/dashboard.json.
 

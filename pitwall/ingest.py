@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 ingest.py — parse a MoTeC .ld file (via ldparser) into the PitWall SQLite database.
 

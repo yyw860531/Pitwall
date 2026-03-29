@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 track.py — corner detection and AC track data parsing.
 
