@@ -301,8 +301,11 @@ PitWall/
 
 ## Roadmap
 
+- [ ] **Agent eval framework** — systematic evaluation of agent output quality (see below)
+- [ ] Agent eval framework — [plan](docs/eval-plan.md)
 - [ ] External reference lap — import a faster driver's `.ld` or AC AI ghost as a cross-session benchmark
 - [ ] Multi-session progress tracking ("T4 improved 0.3s over 3 sessions")
+- [ ] MCP architecture refinement — resources, tool granularity, auth model
 - [ ] Voice coaching between laps (text-to-speech via Coaching Writer)
 - [ ] Web UI with live MCP connection
 - [x] Any car, any track support — no per-track hardcoding
