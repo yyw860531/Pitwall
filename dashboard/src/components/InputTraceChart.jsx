@@ -192,6 +192,7 @@ export default function InputTraceChart({ inputTrace, cornerSummary }) {
           <XAxis
             dataKey="distance_m"
             type="number"
+            domain={[0, samples[samples.length - 1]?.distance_m || 1000]}
             tickLine={false}
             axisLine={{ stroke: '#1e293b' }}
             tick={{ fill: '#475569', fontSize: 10 }}
