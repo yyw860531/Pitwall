@@ -184,6 +184,7 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         for bi, b in enumerate(sector_boundaries):
             if corner_mid >= b:
                 sector_idx = bi + 1
+        sector_idx = min(sector_idx, n_sectors - 1)
 
         if use_sector_ref:
             sector_ref_id = best_sector_lap_ids[sector_idx]
