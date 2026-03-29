@@ -135,24 +135,14 @@ PITWALL_VALID_LAP_MAX_MS=120000
 ### Run
 
 ```bash
-# Ingest a session and generate coaching report
-python scripts/run_session.py data/sessions/your_session.ld
-
-# Data-only export (skip AI agents — much faster)
-python scripts/run_session.py data/sessions/your_session.ld --no-agents
-
-# Re-run analysis on a previously ingested session
-python scripts/run_session.py --session-id 28032026-155415
-
-# List all ingested sessions
-python scripts/run_session.py --list
-
-# Start the dashboard
+python scripts/run_session.py path/to/your_session.ld
 cd dashboard && npm run dev
 # Open http://localhost:5173
 ```
 
-> **Tip:** Drive at least 3–4 clean laps per session. PitWall needs multiple laps to detect corners from lateral-G patterns, compute a meaningful theoretical best, and compare your best against a reference.
+This ingests the telemetry, runs the AI agent pipeline, and writes the dashboard. Add `--no-agents` to skip AI analysis and get a data-only dashboard instantly.
+
+> **Tip:** Drive at least 3–4 clean laps per session. Corner detection and theoretical best need multiple laps to work.
 
 ---
 
