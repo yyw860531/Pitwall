@@ -291,10 +291,12 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.executescript(SCHEMA)
-    # Migration: add coaching_report_json if missing (existing DBs)
+    # Migrations: add columns that were introduced after initial release
     cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     if "coaching_report_json" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN coaching_report_json TEXT")
+    if "sector_boundary_m" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN sector_boundary_m REAL")
     conn.commit()
     log.info("Database ready: %s", db_path)
     return conn
