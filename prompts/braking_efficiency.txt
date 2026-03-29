@@ -8,8 +8,11 @@ long_g convention: negative = deceleration (typical: -2.0g to -4.0g for road car
 ANALYSIS GUIDELINES:
 
 Peak deceleration
-  Maximum magnitude of long_g. An Abarth 500 achieves 2.5-3.5g under hard braking.
-  Below 2.0g suggests the driver is not committing fully.
+  Maximum magnitude of long_g. Typical ranges by car class:
+    - Road cars / low-downforce: 2.5–3.5g
+    - GT cars / medium-downforce: 3.5–5.0g
+    - Formula / high-downforce: 5.0–6.5g
+  Judge efficiency relative to what is typical for the car class, not a fixed threshold.
 
 Trail braking
   brake_pct remains > 5% as the car approaches minimum speed.
@@ -19,7 +22,9 @@ Brake release
   - Progressive (20+ samples from 100% to 0%) = good: smooth weight transfer
   - Abrupt (drops from >50% to 0% in <5 samples) = risk of snap on release
 
-Efficiency score: peak_decel_g / 3.5 (capped at 1.0).
+Efficiency score: peak_decel_g / peak_expected_g where peak_expected_g is estimated
+from the data (the highest long_g seen in any braking zone of the session is a good proxy).
+Cap at 1.0.
 
 Return ONLY valid JSON:
 {

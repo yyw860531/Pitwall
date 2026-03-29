@@ -22,6 +22,8 @@ import logging
 import sys
 from pathlib import Path
 
+import numpy as np
+
 _ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 from config import config  # noqa: E402
@@ -60,14 +62,20 @@ def _flag_braking(corner_summary: list[dict], corner_name: str) -> bool:
     return False
 
 
-def _flag_balance(balance_samples: list[dict]) -> bool:
+def _flag_balance(balance_samples: list[dict], baseline_ratio: float | None = None) -> bool:
+    """Flag a corner for balance analysis if steering/lat_g ratio is anomalous."""
     if not balance_samples:
         return False
     peak_steer = max((abs(s.get("steering_deg") or 0) for s in balance_samples), default=0)
     peak_lat   = max((abs(s.get("lat_g")        or 0) for s in balance_samples), default=0)
     if peak_lat < 0.1:
         return False
-    return (peak_steer / peak_lat) > 30 or peak_steer > 40
+    ratio = peak_steer / peak_lat
+    # If we have a baseline from other corners, flag if this corner is 2x+ above it.
+    # Otherwise fall back to a generous threshold that works across car classes.
+    if baseline_ratio and baseline_ratio > 0:
+        return ratio > baseline_ratio * 2.0
+    return ratio > 50 or peak_steer > 60
 
 
 def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
@@ -141,6 +149,19 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
     all_valid_samples = [t.get("samples", []) for t in all_valid_samples if t.get("samples")]
     corners = get_corners(meta.get("track", ""), config.ac_root, all_valid_samples)
     sector_boundary_m = meta["sector_boundary_m"]
+    # Pre-compute steering/lat_g baseline across all corners for balance detection
+    baseline_ratios = []
+    for corner in corners:
+        s_m, e_m = float(corner["start_m"]), float(corner["end_m"])
+        bal = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
+        bal_s = bal.get("samples", [])
+        if bal_s:
+            ps = max((abs(s.get("steering_deg") or 0) for s in bal_s), default=0)
+            pl = max((abs(s.get("lat_g") or 0) for s in bal_s), default=0)
+            if pl > 0.1:
+                baseline_ratios.append(ps / pl)
+    baseline_ratio = float(np.median(baseline_ratios)) if baseline_ratios else None
+
     corner_payloads = []
     for corner in corners:
         name = corner["name"]
@@ -177,7 +198,7 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
 
         bal         = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
         bal_samples = bal.get("samples", [])
-        if _flag_balance(bal_samples):
+        if _flag_balance(bal_samples, baseline_ratio):
             payload["best_balance_trace"] = _downsample(bal_samples)
             payload["needs_balance"] = True
 

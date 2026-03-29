@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     fastest_time_ms     INTEGER,
     sector_count        INTEGER DEFAULT 2,
     sector_boundary_m   REAL,
+    venue_length_m      REAL,
     coaching_report_json TEXT
 );
 
@@ -297,6 +298,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE sessions ADD COLUMN coaching_report_json TEXT")
     if "sector_boundary_m" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN sector_boundary_m REAL")
+    if "venue_length_m" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN venue_length_m REAL")
     conn.commit()
     log.info("Database ready: %s", db_path)
     return conn
@@ -391,14 +394,29 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
 
     # --- Insert session ---
     # fastest_lap in .ldx is 1-indexed; store as 1-indexed
+    venue_length_m = ldx.get("venue_length_m")
+    sector_boundary_m = venue_length_m / 2 if venue_length_m else None
+
     conn.execute(
         """INSERT INTO sessions
-           (session_id, car, track, date, driver, fastest_lap, fastest_time_ms, sector_count, sector_boundary_m)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?)""",
+           (session_id, car, track, date, driver, fastest_lap, fastest_time_ms,
+            sector_count, sector_boundary_m, venue_length_m)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?, ?)""",
         (session_id, meta["car"], meta["track"], date_fmt, meta["driver"],
          ldx["fastest_lap"], ldx["fastest_time_ms"],
-         ldx["venue_length_m"] / 2 if ldx.get("venue_length_m") else None)
+         sector_boundary_m, venue_length_m)
     )
+
+    # --- Dynamic lap validity window ---
+    # For long tracks (Nordschleife, Spa), the hardcoded 120s max is too short.
+    # Estimate a reasonable max from venue length: ~30 kph minimum average pace.
+    valid_max_ms = config.valid_lap_max_ms
+    if venue_length_m and venue_length_m > 0:
+        estimated_max_ms = int((venue_length_m / 1000) / 30 * 3600 * 1000)  # 30 kph avg
+        valid_max_ms = max(valid_max_ms, estimated_max_ms)
+        if estimated_max_ms > config.valid_lap_max_ms:
+            log.info("Adjusted lap validity max to %dms for %.0fm track",
+                     valid_max_ms, venue_length_m)
 
     # --- Segment and store laps ---
     laps_info = segment_laps(lap_number_ch)
@@ -415,14 +433,14 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
         is_invalid_flag = check_lap_invalid(ld, mask)
         is_valid = (
             not is_invalid_flag
-            and config.valid_lap_min_ms <= lap_time_ms <= config.valid_lap_max_ms
+            and config.valid_lap_min_ms <= lap_time_ms <= valid_max_ms
         )
         is_best = (file_pos == ldx["fastest_lap"])
 
         s1_ms, s2_ms = None, None
-        if is_valid and ldx.get("venue_length_m"):
+        if is_valid and sector_boundary_m:
             s1_ms, s2_ms = compute_sector_time(
-                lap_distance_ch, lap_time_ch, mask, ldx["venue_length_m"] / 2
+                lap_distance_ch, lap_time_ch, mask, sector_boundary_m
             )
 
         log.info("  Lap %d: %dms  valid=%s  best=%s  s1=%s s2=%s",

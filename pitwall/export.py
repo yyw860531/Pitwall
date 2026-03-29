@@ -383,38 +383,46 @@ def _build_theoretical_best_trace(
 def _find_track_map(track_id: str, ac_root) -> Path | None:
     """
     Locate map.png for a track in the AC installation.
-    Handles multi-layout tracks where the map lives in a layout sub-folder.
+
+    AC multi-layout tracks use a parent/layout folder structure:
+        tracks/ks_red_bull_ring/layout_gp/map.png
+    But Telemetrick encodes this as a flat track_id in the filename:
+        ks_red_bull_ring-layout_gp  (or with underscores)
+
+    Strategy: try direct match, then auto-detect parent/layout split by
+    checking which AC track folders actually exist on disk.
     """
     if ac_root is None:
         return None
 
     tracks_dir = ac_root / "content" / "tracks"
+    if not tracks_dir.is_dir():
+        return None
 
-    # 1. Direct match
-    direct = tracks_dir / track_id / "map.png"
-    if direct.exists():
-        return direct
+    # Normalise: Telemetrick may use hyphens where AC uses underscores
+    normalised = track_id.replace("-", "_")
 
-    # 2. Known multi-layout mappings (AC uses parent/layout folder structure)
-    known = {
-        "ks_vallelungaclub_circuit":     ("ks_vallelunga", "club_circuit"),
-        "ks_vallelungaextended_circuit": ("ks_vallelunga", "extended_circuit"),
-        "ks_vallelungaclassic_circuit":  ("ks_vallelunga", "classic_circuit"),
-        "ks_nordschleife":               ("ks_nordschleife", "nordschleife"),
-        "ks_nordschleife_touristenfahrten": ("ks_nordschleife", "touristenfahrten"),
-    }
-    if track_id in known:
-        base, layout = known[track_id]
-        p = tracks_dir / base / layout / "map.png"
+    # 1. Direct match — single-layout track where folder name = track_id
+    for tid in (track_id, normalised):
+        direct = tracks_dir / tid / "map.png"
+        if direct.exists():
+            return direct
+
+    # 2. Auto-detect parent/layout split
+    #    Try every underscore position: if the left part is an existing
+    #    track folder and the right part is a layout sub-folder, use it.
+    parts = normalised.split("_")
+    for i in range(1, len(parts)):
+        parent = "_".join(parts[:i])
+        layout = "_".join(parts[i:])
+        p = tracks_dir / parent / layout / "map.png"
         if p.exists():
             return p
 
-    # 3. Glob fallback — search under any folder matching track_id prefix
-    prefix = track_id[:8] if len(track_id) > 8 else track_id
-    # Single-layout: tracks/{similar_name}/map.png
+    # 3. Glob fallback — fuzzy match on prefix
+    prefix = normalised[:8] if len(normalised) > 8 else normalised
     for candidate in tracks_dir.glob(f"*{prefix}*/map.png"):
         return candidate
-    # Multi-layout: tracks/{similar_name}/{layout}/map.png
     for candidate in tracks_dir.glob(f"*{prefix}*/*/map.png"):
         return candidate
 

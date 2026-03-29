@@ -105,10 +105,15 @@ def _find_corner_regions(
     samples: list[dict],
     lat_g_threshold: float = 0.3,
     min_length_m: float = 10.0,
+    max_corner_m: float = 300.0,
 ) -> list[tuple[float, float, float]]:
     """
     Find regions of sustained lateral G in a single lap.
     Returns list of (start_m, apex_m, end_m) tuples.
+
+    Long sweeps (> max_corner_m) are split at lat-G local minima so that
+    complex sequences like Maggotts-Becketts or Eau Rouge are detected as
+    distinct corners rather than one giant region.
     """
     if len(samples) < 10:
         return []
@@ -126,24 +131,66 @@ def _find_corner_regions(
             corner_start_idx = i
         elif in_corner and g < lat_g_threshold:
             in_corner = False
-            start_m = float(dists[corner_start_idx])
-            end_m   = float(d)
-            if end_m - start_m < min_length_m:
-                continue
-            seg_lat = lat_gs[corner_start_idx:i]
-            apex_idx = corner_start_idx + int(np.argmax(seg_lat))
-            regions.append((start_m, float(dists[apex_idx]), end_m))
+            _emit_region(dists, lat_gs, corner_start_idx, i, min_length_m, max_corner_m, regions)
 
     # Handle corner still open at end of lap
     if in_corner:
-        start_m = float(dists[corner_start_idx])
-        end_m   = float(dists[-1])
-        if end_m - start_m >= min_length_m:
-            seg_lat = lat_gs[corner_start_idx:]
-            apex_idx = corner_start_idx + int(np.argmax(seg_lat))
-            regions.append((start_m, float(dists[apex_idx]), end_m))
+        _emit_region(dists, lat_gs, corner_start_idx, len(dists), min_length_m, max_corner_m, regions)
 
     return regions
+
+
+def _emit_region(
+    dists: np.ndarray, lat_gs: np.ndarray,
+    start_idx: int, end_idx: int,
+    min_length_m: float, max_corner_m: float,
+    regions: list,
+):
+    """Emit one or more corner regions, splitting long sweeps at lat-G dips."""
+    start_m = float(dists[start_idx])
+    end_m   = float(dists[min(end_idx, len(dists) - 1)])
+    if end_m - start_m < min_length_m:
+        return
+
+    seg_lat = lat_gs[start_idx:end_idx]
+
+    # If the region is short enough, emit as-is
+    if end_m - start_m <= max_corner_m:
+        apex_idx = start_idx + int(np.argmax(seg_lat))
+        regions.append((start_m, float(dists[apex_idx]), end_m))
+        return
+
+    # Long sweep — split at local minima in lat-G
+    # Find valleys where lat-G dips below 60% of the region's peak
+    peak_g = seg_lat.max()
+    split_threshold = peak_g * 0.6
+    below = seg_lat < split_threshold
+
+    # Find contiguous below-threshold segments as split points
+    sub_start = start_idx
+    for j in range(1, len(seg_lat)):
+        if below[j] and not below[j - 1] and (float(dists[start_idx + j]) - float(dists[sub_start])) > min_length_m:
+            # Split here
+            split_end = start_idx + j
+            sub_seg = lat_gs[sub_start:split_end]
+            apex_idx = sub_start + int(np.argmax(sub_seg))
+            s = float(dists[sub_start])
+            e = float(dists[split_end])
+            if e - s >= min_length_m:
+                regions.append((s, float(dists[apex_idx]), e))
+            sub_start = split_end
+        elif not below[j] and below[j - 1]:
+            sub_start = start_idx + j
+
+    # Emit the remaining segment
+    if sub_start < start_idx + len(seg_lat):
+        sub_seg = lat_gs[sub_start:end_idx]
+        if len(sub_seg) > 0:
+            s = float(dists[sub_start])
+            e = float(dists[min(end_idx, len(dists) - 1)])
+            if e - s >= min_length_m:
+                apex_idx = sub_start + int(np.argmax(sub_seg))
+                regions.append((s, float(dists[apex_idx]), e))
 
 
 # ---------------------------------------------------------------------------

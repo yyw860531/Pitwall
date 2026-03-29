@@ -47,6 +47,42 @@ def _db() -> sqlite3.Connection:
 # Path safety — used by tools that read AC files
 # ---------------------------------------------------------------------------
 
+def _find_ac_track_file(tracks_dir: Path, track_id: str, *subpath: str) -> Path | None:
+    """
+    Locate a file within an AC track folder, handling multi-layout directory splits.
+    AC uses tracks/{parent}/{layout}/ but Telemetrick encodes as a flat track_id.
+    """
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', track_id):
+        return None
+
+    normalised = track_id.replace("-", "_")
+
+    # 1. Direct match
+    for tid in (track_id, normalised):
+        candidate = tracks_dir / tid / Path(*subpath)
+        if candidate.exists():
+            return candidate
+
+    # 2. Auto-detect parent/layout split at each underscore position
+    parts = normalised.split("_")
+    for i in range(1, len(parts)):
+        parent = "_".join(parts[:i])
+        layout = "_".join(parts[i:])
+        candidate = tracks_dir / parent / layout / Path(*subpath)
+        if candidate.exists():
+            return candidate
+
+    # 3. Glob fallback
+    prefix = normalised[:8] if len(normalised) > 8 else normalised
+    target = str(Path(*subpath))
+    for candidate in tracks_dir.glob(f"*{prefix}*/{target}"):
+        return candidate
+    for candidate in tracks_dir.glob(f"*{prefix}*/*/{target}"):
+        return candidate
+
+    return None
+
+
 def _safe_ac_path(base: Path, user_id: str) -> Path:
     """Resolve a car_id or track_id to a path under base, blocking traversal."""
     if not re.match(r'^[a-zA-Z0-9_\-]+$', user_id):
@@ -299,11 +335,63 @@ def get_ac_car_data(car_id: str) -> dict:
                 except (KeyError, ValueError):
                     pass
 
+    # Read tyres.ini for grip data
+    tyres_ini = car_path / "data" / "tyres.ini"
+    tyre_grip = None
+    if tyres_ini.exists():
+        cp3 = configparser.ConfigParser(strict=False)
+        cp3.read(str(tyres_ini))
+        for section in cp3.sections():
+            for key in ("FRICTION_LIMIT_ANGLE", "DY_REF"):
+                try:
+                    tyre_grip = float(cp3[section][key])
+                    break
+                except (KeyError, ValueError):
+                    pass
+            if tyre_grip:
+                break
+
+    # Read aero.ini for downforce
+    aero_ini = car_path / "data" / "aero.ini"
+    cl_front = cl_rear = None
+    if aero_ini.exists():
+        cp4 = configparser.ConfigParser(strict=False)
+        cp4.read(str(aero_ini))
+        for section in cp4.sections():
+            if cl_front is None:
+                for key in ("CL", "CL_GAIN"):
+                    try:
+                        val = float(cp4[section][key])
+                        if "FRONT" in section.upper():
+                            cl_front = val
+                        elif "REAR" in section.upper():
+                            cl_rear = val
+                        break
+                    except (KeyError, ValueError):
+                        pass
+
+    # Determine drivetrain type from drivetrain.ini
+    dt_ini = car_path / "data" / "drivetrain.ini"
+    drivetrain = None
+    if dt_ini.exists():
+        cp5 = configparser.ConfigParser(strict=False)
+        cp5.read(str(dt_ini))
+        for key in ("TYPE", "type"):
+            try:
+                drivetrain = cp5["TRACTION"][key]
+                break
+            except (KeyError, ValueError):
+                pass
+
     return {
         "car_id":              car_id,
         "mass_kg":             _ini_float("BASIC", "TOTALMASS"),
         "fuel_consumption":    _ini_float("FUEL", "CONSUMPTION"),
         "ai_speed_multiplier": ai_speed_multiplier,
+        "tyre_grip_ref":       tyre_grip,
+        "cl_front":            cl_front,
+        "cl_rear":             cl_rear,
+        "drivetrain":          drivetrain,
     }
 
 
@@ -325,17 +413,9 @@ def get_ac_track_line(track_id: str) -> dict:
         return {"error": "AC_ROOT not configured", "code": "AC_ROOT_MISSING"}
 
     tracks_dir = config.ac_root / "content" / "tracks"
-    try:
-        track_path = _safe_ac_path(tracks_dir, track_id)
-    except ValueError as e:
-        return {"error": str(e), "code": "INVALID_ID"}
 
-    ai_file = track_path / "ai" / "fast_lane.ai"
-    if not ai_file.exists():
-        # Try alternate layout path
-        ai_file = track_path / "ai" / "fast_lane.ai"
-
-    if not ai_file.exists():
+    ai_file = _find_ac_track_file(tracks_dir, track_id, "ai", "fast_lane.ai")
+    if ai_file is None:
         return {"error": f"fast_lane.ai not found for track: {track_id}", "code": "FILE_MISSING"}
 
     try:
