@@ -41,14 +41,13 @@ export default function LapTimeBarChart({ laps, session }) {
   const validTimes = laps.filter(l => l.is_valid).map(l => l.lap_time_ms)
   const fastestValid = validTimes.length ? Math.min(...validTimes) : null
 
-  // Filter: show laps within 150% of fastest valid time (hides out laps / cooldowns)
-  const cutoff = fastestValid ? fastestValid * 1.5 : Infinity
-  const chartData = laps.filter(l => l.lap_time_ms > 5000 && l.lap_time_ms <= cutoff)
+  // Only show valid laps — out laps and cool-down laps distort the Y-axis scale
+  const chartData = laps.filter(l => l.is_valid && l.lap_time_ms > 5000)
 
-  // Tight Y-axis around valid laps only
-  const shownValid = chartData.filter(l => l.is_valid).map(l => l.lap_time_ms)
-  const yMin = shownValid.length ? Math.min(...shownValid) - 2000 : 0
-  const yMax = shownValid.length ? Math.max(...shownValid) + 2000 : 100000
+  // Tight Y-axis around valid laps
+  const times = chartData.map(l => l.lap_time_ms)
+  const yMin = times.length ? Math.min(...times) - 2000 : 0
+  const yMax = times.length ? Math.max(...times) + 2000 : 100000
 
   return (
     <div>
@@ -98,7 +97,6 @@ export default function LapTimeBarChart({ laps, session }) {
           { color: COLORS.best,      label: 'Best' },
           { color: COLORS.reference, label: 'Reference' },
           { color: COLORS.valid,     label: 'Valid' },
-          { color: COLORS.invalid,   label: 'Invalid' },
           { color: '#60a5fa',        label: 'Theoretical best', dashed: true },
         ].map(({ color, label, dashed }) => (
           <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
