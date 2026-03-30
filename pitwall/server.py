@@ -170,6 +170,7 @@ def get_lap_trace(
     channels: list[str],
     distance_start_m: float = 0.0,
     distance_end_m: float = 9999.0,
+    stride: int = 1,
 ) -> dict:
     """
     Return raw telemetry samples for a lap within a distance range.
@@ -214,11 +215,12 @@ def get_lap_trace(
             (lap_id, distance_start_m, distance_end_m),
         ).fetchall()
 
-        samples = [dict(r) for r in rows]
+        samples = [dict(r) for r in rows[::max(1, stride)]]
         return {
             "lap_id": lap_id,
             "distance_range_m": [distance_start_m, distance_end_m],
             "sample_count": len(samples),
+            "stride": max(1, stride),
             "channels": cols,
             "samples": samples,
         }

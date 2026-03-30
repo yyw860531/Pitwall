@@ -137,6 +137,10 @@ def _init_registry():
 					"type": "number",
 					"description": "End distance in metres (default 9999)",
 				},
+				"stride": {
+					"type": "integer",
+					"description": "Take every Nth sample (default 1). Use 3-5 for overview, 1 for detail.",
+				},
 			},
 			"required": ["lap_id", "channels"],
 		},
@@ -256,7 +260,11 @@ def run_agent(
 	for turn in range(max_turns + 1):
 		kwargs: dict = {
 			"model": active_model,
-			"system": system,
+			"system": [{
+				"type": "text",
+				"text": system,
+				"cache_control": {"type": "ephemeral"},
+			}],
 			"messages": messages,
 			"max_tokens": max_tokens,
 		}

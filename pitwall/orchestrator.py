@@ -98,6 +98,7 @@ def _plan(summary: dict) -> dict:
 		user_message=json.dumps(summary, separators=(",", ":")),
 		allowed_tools=None,  # zero tools
 		max_tokens=2048,
+		model=config.claude_model_fast,  # rules-based planning, Haiku is sufficient
 		max_turns=2,  # 1 turn + 1 JSON retry buffer
 	)
 	return plan
