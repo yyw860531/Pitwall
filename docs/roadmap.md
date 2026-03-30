@@ -124,16 +124,37 @@ The complexity of race performance analysis demands more than single-turn Q&A. R
 - **Agent handoffs** — orchestrator delegates to sub-agents with proper context. Coaching writer could query the corner analysis agent for clarification instead of working from static JSON.
 - **Guardrails** — input/output schema validation built into the framework. Currently hand-rolled with JSON parse + retry.
 
+**What happens to data_gatherer:**
+
+data_gatherer is not really an agent today — it's a Python function that fetches and packages data with zero LLM involvement. In the Agent SDK world, it disappears entirely:
+
+- The server functions it wraps (`get_lap_trace`, `get_session_metadata`, etc.) become MCP tools that any agent can call directly
+- Each analysis agent requests what it needs on demand — "I see a weird braking profile at T4, let me also pull the throttle trace"
+- The packaging logic (which corners need braking analysis, balance baseline) moves into the orchestrator agent's reasoning
+- No more pre-built payloads. Agents pull data, reason, pull more data, conclude.
+
+```
+Current:  orchestrator → data_gatherer.gather() → pre-packages everything
+              ↓
+          agents get fixed payloads, can't ask for more
+
+Future:   orchestrator agent → spawns corner_analysis agent with MCP tools
+              ↓
+          corner_analysis calls get_lap_trace(T4, [speed, brake])
+          spots anomaly → calls get_lap_trace(T4, [throttle, steering])
+          reasons over combined data → returns analysis
+```
+
 **Migration path:**
 
-1. **Phase 1: MCP client/server separation** — data_gatherer currently imports server functions directly as Python. Move to proper MCP client so tools are callable over transport (stdio or HTTP). This is a prerequisite — agents need tool definitions to use tool_use.
-2. **Phase 2: Agent SDK for analysis agents** — convert corner_analysis, braking_efficiency, balance_diagnosis from single-turn `call_claude_json()` to Agent SDK agents with MCP tools available. Each agent gets a tool list and can request additional data mid-analysis.
+1. **Phase 1: MCP server as real transport** — expose server.py's 6 tools over MCP stdio so agents can call them as tools. data_gatherer still exists as a fallback but agents gain direct access.
+2. **Phase 2: Agent SDK for analysis agents** — convert corner_analysis, braking_efficiency, balance_diagnosis from single-turn `call_claude_json()` to Agent SDK agents with MCP tools available. Each agent gets the tool list and autonomously decides what data to fetch. data_gatherer removed.
 3. **Phase 3: Orchestrator as agent** — replace the Python orchestrator with an Agent SDK orchestrator that uses handoffs. It decides which agents to run and in what order, but can also react to intermediate results (e.g., if corner analysis reveals a systemic braking issue across multiple corners, escalate to a dedicated braking deep-dive).
 4. **Phase 4: Coaching writer with agent queries** — coaching writer can query individual analysis agents for clarification or request re-analysis with different parameters, producing richer reports.
 
 **Design decisions to make:**
 
-- **Transport:** stdio (simplest, single-process) vs HTTP (multi-process, enables remote agents). Stdio for Phase 1-2, HTTP if we need to scale.
+- **Transport:** stdio — single-process, local only. Keeps things simple and avoids network overhead for a tool that runs on the driver's own machine.
 - **Tool granularity:** Current 6 tools may be too coarse for agent-driven analysis. Consider splitting `get_lap_trace` into channel-specific tools, or adding a `compare_traces` tool that returns delta directly.
 - **Cost control:** Multi-turn agents consume more tokens. Need per-agent token budgets and circuit breakers. Haiku for data-fetching turns, Sonnet/Opus for reasoning turns.
 - **Eval impact:** Multi-turn agents are harder to eval than single-turn. Layer 2 eval (LLM-as-judge) needs to assess conversation quality, not just final output.
