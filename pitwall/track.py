@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 track.py — corner detection and AC track data parsing.
 
@@ -98,8 +96,9 @@ def corners_from_telemetry(laps_samples: list[list[dict]]) -> list[dict]:
 
     result.sort(key=lambda c: c["start_m"])
 
-    # Merge corners that overlap or have < 50m gap between them
-    MIN_GAP_M = 50.0
+    # Merge corners that overlap or have < 20m gap between them.
+    # 50m was too aggressive — it swallowed closely-spaced chicanes (e.g. Les Combes, Bus Stop at Spa).
+    MIN_GAP_M = 20.0
     merged = []
     for c in result:
         if merged and c["start_m"] - merged[-1]["end_m"] < MIN_GAP_M:
