@@ -336,7 +336,8 @@ def _build_theoretical_best_trace(
         return None
 
     sector_keys = ["s1_ms", "s2_ms", "s3_ms"]
-    n_sectors = len(sector_boundaries) + 1
+    # Cap at 3 — DB schema only stores s1/s2/s3 regardless of how many AC sectors exist
+    n_sectors = min(len(sector_boundaries) + 1, len(sector_keys))
 
     # Find laps with all required sector times
     valid = [l for l in laps if l["is_valid"]]
@@ -552,7 +553,8 @@ def build_dashboard(
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        n_sectors = len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2
+        # Cap at 3 — DB schema only stores s1/s2/s3 regardless of how many AC sectors exist
+        n_sectors = min(len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2, 3)
         sector_keys = ["s1_ms", "s2_ms", "s3_ms"][:n_sectors]
 
         # Theoretical best = sum of best individual sector times
