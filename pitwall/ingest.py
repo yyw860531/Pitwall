@@ -329,6 +329,23 @@ def session_exists(conn: sqlite3.Connection, session_id: str) -> bool:
     return row is not None
 
 
+def delete_session(session_id: str, db_path: Path | None = None) -> bool:
+    """Delete a session and all its laps/telemetry from the database."""
+    db_path = Path(db_path or config.db_path)
+    conn = init_db(db_path)
+    try:
+        if not session_exists(conn, session_id):
+            return False
+        conn.execute("DELETE FROM telemetry WHERE lap_id LIKE ?", (f"{session_id}_%",))
+        conn.execute("DELETE FROM laps WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+        log.info("Deleted session %s", session_id)
+        return True
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Main ingest function
 # ---------------------------------------------------------------------------

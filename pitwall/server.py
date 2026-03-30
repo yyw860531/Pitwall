@@ -534,6 +534,49 @@ async def api_scan(request):
     return JSONResponse({"new_sessions": len(new_sessions), "sessions": new_sessions})
 
 
+@mcp.custom_route("/api/delete/{session_id}", methods=["POST"])
+async def api_delete(request):
+    """Delete a session and all its data. Returns {"deleted": true/false}."""
+    from pitwall.ingest import delete_session
+    session_id = request.path_params.get("session_id", "")
+    try:
+        deleted = delete_session(session_id)
+        return JSONResponse({"deleted": deleted, "session_id": session_id})
+    except Exception as e:
+        log.error("Delete failed for %s: %s", session_id, e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/reimport/{session_id}", methods=["POST"])
+async def api_reimport(request):
+    """Delete a session then re-ingest from the original .ld file."""
+    from pitwall.ingest import delete_session, ingest, derive_session_id
+    from pitwall.export import build_dashboard
+    session_id = request.path_params.get("session_id", "")
+
+    # Find the .ld file in TELEMETRY_EXPORT_DIR
+    if config.telemetry_export_dir is None:
+        return JSONResponse({"error": "TELEMETRY_EXPORT_DIR not configured"}, status_code=400)
+
+    ld_file = None
+    for f in config.telemetry_export_dir.rglob("*.ld"):
+        if derive_session_id(f) == session_id:
+            ld_file = f
+            break
+
+    if ld_file is None:
+        return JSONResponse({"error": f"No .ld file found for {session_id}"}, status_code=404)
+
+    try:
+        delete_session(session_id)
+        new_sid = ingest(ld_file)
+        dashboard = build_dashboard(new_sid)
+        return JSONResponse(dashboard)
+    except Exception as e:
+        log.error("Re-import failed for %s: %s", session_id, e, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @mcp.custom_route("/api/export/{session_id}", methods=["POST"])
 async def api_export(request):
     """Return full dashboard data for a session directly as JSON."""
@@ -543,7 +586,7 @@ async def api_export(request):
         dashboard = build_dashboard(session_id)
         return JSONResponse(dashboard)
     except Exception as e:
-        log.error("Export failed for %s: %s", session_id, e)
+        log.error("Export failed for %s: %s", session_id, e, exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

@@ -537,6 +537,8 @@ def build_dashboard(
         ref_type = "driven" if ref_lap else "none"
 
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
+        if not best_samples:
+            raise ValueError(f"No telemetry data for best lap {best_lap['lap_id']}")
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"]) if ref_lap else best_samples
 
         valid_laps = [l for l in laps if l["is_valid"]]
