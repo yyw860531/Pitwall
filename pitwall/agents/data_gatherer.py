@@ -288,6 +288,17 @@ def gather(
         if "error" not in td:
             track_data = td
 
+    # Build a lightweight car context for analysis agents
+    car_context = None
+    if car_data:
+        car_context = {
+            "car_id":        car_data.get("car_id"),
+            "drivetrain":    car_data.get("drivetrain"),      # FWD / RWD / AWD
+            "mass_kg":       car_data.get("mass_kg"),
+            "has_aero":      bool(car_data.get("cl_front") or car_data.get("cl_rear")),
+            "tyre_grip_ref": car_data.get("tyre_grip_ref"),
+        }
+
     return {
         "session_id":      session_id,
         "session_meta":    meta,
@@ -295,5 +306,6 @@ def gather(
         "ref_type":        ref_type,
         "corner_payloads": corner_payloads,
         "car_data":        car_data,
+        "car_context":     car_context,
         "track_data":      track_data,
     }

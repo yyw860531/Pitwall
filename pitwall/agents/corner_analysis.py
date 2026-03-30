@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 _SYSTEM = load_prompt("corner_analysis.txt")
 
 
-def analyze(corner_payload: dict) -> dict:
+def analyze(corner_payload: dict, car_context: dict | None = None) -> dict:
     """
     Analyse a single corner. Returns a CornerAnalysisResult dict.
     Returns an error dict on failure so the pipeline keeps running.
@@ -28,6 +28,8 @@ def analyze(corner_payload: dict) -> dict:
     }
     if corner_payload.get("sector_delta_ms") is not None:
         payload["sector_delta_ms"] = corner_payload["sector_delta_ms"]
+    if car_context:
+        payload["car_context"] = car_context
 
     user = json.dumps(payload, separators=(",", ":"))
 

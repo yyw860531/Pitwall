@@ -16,6 +16,7 @@ def write(
     corner_analyses: list[dict],
     braking_results: list[dict],
     balance_results: list[dict],
+    car_context: dict | None = None,
 ) -> dict:
     """Generate the coaching_report block for dashboard.json."""
     log.info("Generating coaching report...")
@@ -30,12 +31,15 @@ def write(
         "reference_type":      session_meta.get("reference_type", "driven"),
     }
 
-    user = json.dumps({
+    payload = {
         "session_meta":    meta_summary,
         "corner_analyses": corner_analyses,
         "braking_results": [r for r in braking_results if r],
         "balance_results": [r for r in balance_results if r],
-    }, separators=(",", ":"))
+    }
+    if car_context:
+        payload["car_context"] = car_context
+    user = json.dumps(payload, separators=(",", ":"))
 
     try:
         result = call_claude_json(_SYSTEM, user, max_tokens=4096)

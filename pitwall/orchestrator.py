@@ -65,6 +65,7 @@ def orchestrate(
 
     session_meta = payload["session_meta"]
     corner_payloads = payload["corner_payloads"]
+    car_context = payload.get("car_context")
     session_meta["reference_type"] = payload["ref_type"]
 
     # ------------------------------------------------------------------
@@ -92,7 +93,7 @@ def orchestrate(
 
     corner_analyses = []
     for cp in top_corners:
-        result = corner_analysis.analyze(cp)
+        result = corner_analysis.analyze(cp, car_context)
         corner_analyses.append(result)
 
     # ------------------------------------------------------------------
@@ -102,7 +103,7 @@ def orchestrate(
     braking_results = []
     for cp in top_corners:
         if cp.get("needs_braking"):
-            result = braking_efficiency.analyze(cp)
+            result = braking_efficiency.analyze(cp, car_context)
             if result:
                 braking_results.append(result)
     if not braking_results:
@@ -115,7 +116,7 @@ def orchestrate(
     balance_results = []
     for cp in top_corners:
         if cp.get("needs_balance"):
-            result = balance_diagnosis.analyze(cp)
+            result = balance_diagnosis.analyze(cp, car_context)
             if result:
                 balance_results.append(result)
     if not balance_results:
@@ -148,6 +149,7 @@ def orchestrate(
         corner_analyses=corner_analyses,
         braking_results=braking_results,
         balance_results=balance_results,
+        car_context=car_context,
     )
 
     log.info("=== Pipeline complete ===")

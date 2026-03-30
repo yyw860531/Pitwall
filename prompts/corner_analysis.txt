@@ -14,6 +14,14 @@ When ref_trace is the AC AI optimal profile:
 Each trace is an array of samples: lap_distance_m (or distance_m), speed_kph, brake_pct,
 throttle_pct, gear. Distance values are absolute lap distances (metres), corner window only.
 
+If "car_context" is provided, use it to tailor your analysis:
+  - drivetrain (FWD/RWD/AWD): affects throttle pickup advice — AWD can get on power earlier,
+    RWD needs more patience at corner exit, FWD should trail brake deeper and straighten before throttle
+  - mass_kg: heavier cars need earlier braking and more trail brake to rotate
+  - has_aero: high-downforce cars can carry more speed through fast corners but the advantage
+    fades at low speed — adjust apex speed expectations accordingly
+  If car_context is absent, give generic advice.
+
 ANALYSIS GUIDELINES:
 
 Brake point

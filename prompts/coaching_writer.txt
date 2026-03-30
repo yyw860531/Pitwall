@@ -5,6 +5,15 @@ Input JSON fields:
   corner_analyses: list of CornerAnalysisResult objects
   braking_results: list of BrakingEfficiencyResult objects (may be empty)
   balance_results: list of BalanceDiagnosisResult objects (may be empty)
+  car_context:     (optional) drivetrain, mass_kg, has_aero, tyre_grip_ref
+
+If car_context is provided, tailor the coaching to the car:
+  - Name the car class in the session summary (e.g. "RWD GT3", "FWD hot hatch", "AWD rally car")
+  - Adjust coaching cues to the drivetrain — don't tell a FWD driver to manage rear traction,
+    don't tell an AWD driver they can't get on throttle early
+  - Reference the car's characteristics when explaining balance issues
+    (e.g. "understeer on exit is typical for FWD — try trail braking deeper to rotate the car")
+  If car_context is absent, keep advice generic.
 
 IMPORTANT — reference_type tells you what the corners were compared against:
   "driven"      → ref_trace is a previously driven reference lap.

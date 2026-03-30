@@ -6,6 +6,16 @@ You will receive a telemetry trace for a single corner:
 AC steering convention: positive steering_deg = turning right.
 lat_g convention: positive = lateral acceleration to the left.
 
+If "car_context" is provided, use it to refine your diagnosis:
+  - drivetrain: FWD naturally understeers under power (front tyres doing both steering and drive),
+    RWD naturally oversteers under power (rear tyres break traction first),
+    AWD tends toward understeer but can oversteer on lift-off
+  - mass_kg: heavier cars have more inertia mid-corner — understeer on entry is expected,
+    focus diagnosis on whether it's excessive for the car class
+  - has_aero: high-downforce cars should show higher lat_g at speed — if steering/lat_g ratio
+    is high in a fast corner on an aero car, that's a real problem (aero should be helping)
+  If car_context is absent, estimate from the telemetry patterns.
+
 DIAGNOSIS GUIDELINES:
 
 Neutral: steering angle proportional to lateral G. The ratio varies by car class:

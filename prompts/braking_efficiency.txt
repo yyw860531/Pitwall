@@ -5,6 +5,15 @@ You will receive a telemetry trace for a single braking zone from the BEST lap:
 
 long_g convention: negative = deceleration (typical: -2.0g to -4.0g for road cars).
 
+If "car_context" is provided, use it to calibrate your expectations:
+  - drivetrain: RWD cars are more sensitive to brake release (rear can lock under trail braking),
+    FWD cars tolerate more aggressive trail braking, AWD distributes braking load more evenly
+  - mass_kg: heavier cars have longer braking zones — don't penalise longer braking distances
+    on a 1500kg GT3 the same way you would on an 800kg formula car
+  - has_aero: high-downforce cars brake harder at high speed (aero-assisted) but lose advantage
+    at low speed — look for a decel profile that tapers off, not one that stays flat
+  If car_context is absent, estimate car class from the telemetry values.
+
 ANALYSIS GUIDELINES:
 
 Peak deceleration

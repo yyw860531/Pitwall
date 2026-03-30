@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 _SYSTEM = load_prompt("braking_efficiency.txt")
 
 
-def analyze(corner_payload: dict) -> dict | None:
+def analyze(corner_payload: dict, car_context: dict | None = None) -> dict | None:
     """
     Analyse braking efficiency. Returns None if no braking trace available.
     """
@@ -22,11 +22,14 @@ def analyze(corner_payload: dict) -> dict | None:
         return None
 
     log.info("Braking analysis: %s", name)
-    user = json.dumps({
+    payload = {
         "corner_name":        name,
         "distance_range_m":   [corner_payload["start_m"], corner_payload["end_m"]],
         "best_braking_trace": trace,
-    }, separators=(",", ":"))
+    }
+    if car_context:
+        payload["car_context"] = car_context
+    user = json.dumps(payload, separators=(",", ":"))
 
     try:
         result = call_claude_json(_SYSTEM, user, max_tokens=512, model=config.claude_model_fast)
