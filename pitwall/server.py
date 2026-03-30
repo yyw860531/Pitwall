@@ -571,10 +571,14 @@ async def api_analyse(request):
         laps = [dict(r) for r in conn.execute(
             "SELECT * FROM laps WHERE session_id=? ORDER BY lap_number", (session_id,)
         ).fetchall()]
-        best_lap = next((l for l in laps if l["is_best"]), None)
-        ref_lap  = next((l for l in laps if l.get("is_reference")), None)
-        if ref_lap is None:
-            candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
+        best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+        if best_lap is None:
+            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+            if valid:
+                best_lap = min(valid, key=lambda l: l["lap_time_ms"])
+        ref_lap = next((l for l in laps if l.get("is_reference")), None)
+        if ref_lap is None and best_lap:
+            candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
             if candidates:
                 ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
         corner_summary = []

@@ -518,15 +518,21 @@ def build_dashboard(
         ).fetchall()
         laps = [dict(r) for r in laps_rows]
 
-        best_lap = next((l for l in laps if l["is_best"]), None)
-        ref_lap  = next((l for l in laps if l["is_reference"]), None)
-        if ref_lap is None:
-            valid_laps = [l for l in laps if l["is_valid"] and not l["is_best"]]
-            if valid_laps:
-                ref_lap = min(valid_laps, key=lambda l: l["lap_time_ms"])
+        best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+        # Fallback: fastest valid lap if .ldx best lap was invalidated
+        if best_lap is None:
+            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+            if valid:
+                best_lap = min(valid, key=lambda l: l["lap_time_ms"])
 
         if best_lap is None:
-            raise ValueError(f"No best lap found for session {session_id}")
+            raise ValueError(f"No valid laps found for session {session_id}")
+
+        ref_lap = next((l for l in laps if l["is_reference"]), None)
+        if ref_lap is None:
+            candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
+            if candidates:
+                ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
 
         ref_type = "driven" if ref_lap else "none"
 
