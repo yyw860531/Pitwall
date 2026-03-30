@@ -23,6 +23,50 @@ Living document for planned features, agent additions, and optimisation ideas.
 - Input: all valid lap traces for each corner
 - Output: variance per corner, consistency score, outlier lap identification
 
+**Corner Flow Agent** — Priority: HIGH
+
+The most common mistake fast-ish drivers make: entry speed feels fast, but it compromises the entire exit phase. No sim tool currently detects this tradeoff or explains why it happens.
+
+*What it analyses:*
+
+1. **Coasting detection** — distance where both brake_pct < 5% AND throttle_pct < 10%. Dead time. Every metre of coasting is ~20-30ms lost. Root causes: over-entry, early brake release without trail braking, car not rotated enough to get on throttle.
+2. **Entry/exit tradeoff** — compare entry speed vs exit speed vs reference. Detect "net negative" corners: "You carry 5 kph more at entry but lose 8 kph at exit. Brake 10m earlier, roll more speed through the apex, get on throttle 15m sooner."
+3. **Under-rotation detection** — high steering angle at apex relative to car baseline. Trail braking deeper would rotate the car before apex.
+4. **Exit speed weighting** — weight each corner by the following straight length. 5 kph exit loss before a 1km straight = 300ms+. Before a 50m link = almost nothing. This changes which corners actually matter.
+5. **Corner sequence analysis** — detect pairs where sacrificing one corner's entry benefits the next corner's exit. "Sacrifice T5 entry for T6 exit — T6 leads onto the main straight."
+6. **Line analysis** (later) — use `car_pos_norm` channel to detect track width usage.
+
+*Design principles:*
+
+- **Deterministic first, AI second** — coasting distance, exit speed delta, straight length are pure calculations in export.py. The agent explains WHY and recommends WHAT TO CHANGE, not calculates.
+- **One agent, one lens** — focuses on corner flow (entry → apex → exit → straight). Doesn't duplicate braking or balance analysis.
+- **Car-aware** — uses car_context. AWD can get on throttle earlier. Heavy cars coast more on entry. Aero cars can carry more mid-corner.
+- **Straight-length weighted** — always answer "how much does this cost on the following straight?" not just "how much time in this corner?"
+- **Corner pairs, not just individual corners** — understand sequential dependencies. This is the differentiator vs every other sim tool.
+
+*Input:* full corner traces + car_context + following straight length + corner sequence adjacency
+
+*Output:*
+```json
+{
+  "corner_name": "T4",
+  "coasting_distance_m": 12.5,
+  "coasting_pct": 8.2,
+  "entry_exit_balance": "over_entry",
+  "exit_speed_delta_kph": -8.3,
+  "following_straight_m": 890,
+  "estimated_straight_time_loss_ms": 340,
+  "corner_pair": { "linked_to": "T5", "recommendation": "..." },
+  "coaching_cues": ["..."]
+}
+```
+
+*Implementation phases:*
+1. Add deterministic metrics to export.py: coasting distance, exit speed, straight length per corner
+2. Build Corner Flow Agent as new agent in pitwall/agents/
+3. Add to orchestrator pipeline after corner_analysis
+4. Dashboard: coasting column in corner summary, exit speed overlay
+
 **Tyre/Grip Agent** — Priority: MEDIUM
 - Friction circle analysis (lat_g vs long_g)
 - Answers: "are you using the available grip?" and "where are you coasting?"
