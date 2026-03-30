@@ -413,6 +413,14 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     # fastest_lap in .ldx is 1-indexed; store as 1-indexed
     venue_length_m = ldx.get("venue_length_m")
 
+    # Fallback: derive venue length from telemetry (max lap_distance_m)
+    if not venue_length_m and lap_distance_ch is not None:
+        venue_length_m = float(max(lap_distance_ch))
+        if venue_length_m > 0:
+            log.info("Derived venue length from telemetry: %.0fm", venue_length_m)
+        else:
+            venue_length_m = None
+
     # Try to read real sector boundaries from AC sections.ini
     import json as _json
     sector_boundaries: list[float] = []
