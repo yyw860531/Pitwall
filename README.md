@@ -301,6 +301,7 @@ Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan:
 - [ ] Claude Agent SDK migration — multi-turn agents with tool use, replacing single-turn API calls
 - [ ] MCP client/server separation — agents consume data via MCP protocol, not direct imports
 - [ ] Corner Flow Agent — coasting detection, entry/exit tradeoff, exit speed weighted by straight length
+- [ ] Gear Selection Agent — shift timing, downshift pacing per car class, power band utilisation
 - [ ] Track Strategy Agent — weight corner priority by straight length and corner sequences
 - [ ] Consistency Agent — identify high-variance corners across laps
 - [ ] Optimal braking point calculation from deceleration profiles

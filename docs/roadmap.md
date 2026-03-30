@@ -67,6 +67,51 @@ The most common mistake fast-ish drivers make: entry speed feels fast, but it co
 3. Add to orchestrator pipeline after corner_analysis
 4. Dashboard: coasting column in corner summary, exit speed overlay
 
+**Gear Selection Agent** — Priority: HIGH
+
+Wrong gear = wrong part of the power band = slow exit. Detectable from gear + RPM + speed data, and AC car physics provide the power/torque curves to know what's optimal.
+
+*What it analyses:*
+
+1. **Upshift timing** — did the driver shift too early (below peak power RPM) or hold the gear too long (hitting the limiter)? With car_data power curve from AC, compute the optimal shift RPM and compare.
+2. **Downshift pacing** — how quickly the driver drops through gears on entry. This is car-class dependent:
+   - Formula / sequential with seamless shift: bang through gears as fast as you want
+   - GT cars / paddle shift with rev match: fast but need to respect rev-match timing
+   - Road cars / H-pattern or synchromesh: must pace downshifts — too fast causes rear lock-up or over-rev. Each downshift needs time for revs to settle.
+   - Detect: rapid gear changes (< N samples between shifts) on a car class that can't handle it
+3. **Gear choice at apex** — is the driver in the right gear for the corner's minimum speed? Too high a gear bogs the exit. Too low wastes time over-revving.
+4. **Exit gear vs power band** — at throttle pickup, is RPM in the power band or below it? "You're at 4200 RPM in 4th but peak torque is at 6500 — stay in 3rd until the straight."
+
+*Design principles:*
+- **Car-aware is mandatory** — this agent is useless without car_context. Downshift pacing advice for a Miata vs an F1 car is completely different.
+- **Deterministic first** — compute shift points, time between downshifts, RPM at apex/exit in export.py. Agent explains the impact and coaching.
+- **Channels needed:** gear, rpm, speed_kph (all already captured at 30Hz)
+- **AC data needed:** power curve from car physics files (extend `get_ac_car_data` to read `power.lut`)
+
+*Input:* corner traces with gear + RPM + speed, car_context with power curve, car class indicator
+
+*Output:*
+```json
+{
+  "corner_name": "T4",
+  "apex_gear": 3,
+  "optimal_apex_gear": 2,
+  "exit_rpm": 4200,
+  "power_band_rpm": [6000, 7500],
+  "downshift_pace": "too_fast",
+  "downshift_interval_ms": [80, 95],
+  "recommended_interval_ms": 200,
+  "coaching_cues": ["Drop to 2nd for T4 apex — you're bogging at 4200 RPM in 3rd",
+                     "Pace your downshifts — 80ms between shifts is too fast for this gearbox"]
+}
+```
+
+**Progression Agent** — Priority: MEDIUM (needs multi-session comparison)
+- Cross-session tracking: "T4 improved 0.3s over 3 sessions, T7 regressed by 0.1s"
+- Answers: "am I actually getting better, and where?"
+- Needs DB queries across sessions for the same car/track combo
+- Motivation layer — quantifies improvement over time
+
 **Tyre/Grip Agent** — Priority: MEDIUM
 - Friction circle analysis (lat_g vs long_g)
 - Answers: "are you using the available grip?" and "where are you coasting?"
