@@ -38,12 +38,17 @@ function CustomTooltip({ active, payload }) {
 }
 
 export default function LapTimeBarChart({ laps, session }) {
-  // Only include laps with a full time reading
-  const chartData = laps.filter(l => l.lap_time_ms > 5000)
-
   const validTimes = laps.filter(l => l.is_valid).map(l => l.lap_time_ms)
-  const yMin = validTimes.length ? Math.floor(Math.min(...validTimes) / 1000) * 1000 - 2000 : 0
-  const yMax = validTimes.length ? Math.ceil(Math.max(...validTimes) / 1000) * 1000 + 2000 : 100000
+  const fastestValid = validTimes.length ? Math.min(...validTimes) : null
+
+  // Filter: show laps within 150% of fastest valid time (hides out laps / cooldowns)
+  const cutoff = fastestValid ? fastestValid * 1.5 : Infinity
+  const chartData = laps.filter(l => l.lap_time_ms > 5000 && l.lap_time_ms <= cutoff)
+
+  // Tight Y-axis around valid laps only
+  const shownValid = chartData.filter(l => l.is_valid).map(l => l.lap_time_ms)
+  const yMin = shownValid.length ? Math.min(...shownValid) - 2000 : 0
+  const yMax = shownValid.length ? Math.max(...shownValid) + 2000 : 100000
 
   return (
     <div>

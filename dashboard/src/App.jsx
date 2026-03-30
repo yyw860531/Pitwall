@@ -20,8 +20,8 @@ const S = {
   grid:   { display: 'grid', gridTemplateColumns: '1fr 520px', gap: '1px', background: '#1e293b', minHeight: 'calc(100vh - 88px)' },
   left:   { background: '#0a0a0f', display: 'flex', flexDirection: 'column', gap: '1px' },
   right:  { background: '#0f172a', borderLeft: '1px solid #1e293b', position: 'sticky', top: 88, height: 'calc(100vh - 88px)', overflowY: 'auto' },
-  // Top row inside left: lap bar chart + track map side by side
-  topRow: { display: 'grid', gridTemplateColumns: '1fr 200px', gap: '1px', background: '#1e293b' },
+  // Top row inside left: lap bar chart + track map stacked vertically
+  topRow: { display: 'flex', flexDirection: 'column', gap: '1px', background: '#1e293b' },
   panel:  { background: '#0f172a', padding: '16px' },
 }
 
@@ -183,12 +183,11 @@ export default function App() {
 
       <div style={S.grid}>
         <div style={S.left}>
-          {/* Top row: lap bar chart + track map */}
           <div style={S.topRow}>
             <div style={S.panel}>
               <LapTimeBarChart laps={data.laps} session={data.session} />
             </div>
-            <div style={{ ...S.panel, padding: '16px' }}>
+            <div style={S.panel}>
               <TrackMap trackMapUrl={data.session.track_map_url} />
             </div>
           </div>
