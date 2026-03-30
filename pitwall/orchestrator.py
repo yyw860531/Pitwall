@@ -49,7 +49,7 @@ def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
     log.info("=== PitWall orchestrator: %s ===", session_id)
 
     # ------------------------------------------------------------------
-    # Step 1: Gather all data (Data Gatherer -- only MCP-connected agent)
+    # Step 1: Gather all data (Data Gatherer -- direct server imports)
     # ------------------------------------------------------------------
     log.info("[1/5] Gathering session data...")
     try:

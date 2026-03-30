@@ -39,23 +39,26 @@ After each session, PitWall:
       ↓  exports .ld + .ldx after session
 [ingest.py]  →  [SQLite]
                     ↓
-              [MCP Server]        ←  6 tools, pure data retrieval, zero analysis
-                    ↓
-       [Data Gatherer Agent]      ←  only agent with MCP access
-                    ↓ SessionPayload
-         [Orchestrator Claude]    ←  coordinates, never analyses
-          ├── Corner Analysis Agent
-          ├── Braking Efficiency Agent
-          ├── Balance Diagnosis Agent
-          ├── Synthetic Lap Agent
-          └── Coaching Writer Agent
-                    ↓
-         [dashboard.json]  →  [React Dashboard]
+              [server.py]         ←  6 data functions + HTTP API, zero analysis
+            ↙              ↘
+  [Data Gatherer]      [React Dashboard]
+  (direct import)      (REST /api/*)
+         ↓ SessionPayload
+  [Orchestrator Claude]    ←  coordinates, never analyses
+   ├── Corner Analysis Agent
+   ├── Braking Efficiency Agent
+   ├── Balance Diagnosis Agent
+   ├── Synthetic Lap Agent
+   └── Coaching Writer Agent
+         ↓
+  [dashboard.json]  →  [React Dashboard]
 ```
+
+> **Note:** The data gatherer calls server functions as direct Python imports for speed. The dashboard hits REST endpoints hosted by the same FastMCP process. MCP stdio transport is available but not yet consumed by any client — see [roadmap](docs/roadmap.md) for plans to add proper MCP client/server separation.
 
 ### Design principles
 
-- **MCP is a data boundary.** MCP tools do zero calculation — pure SQL queries and file reads. All racing knowledge lives in agents.
+- **Server is a data boundary.** Server functions do zero calculation — pure SQL queries and file reads. All racing knowledge lives in agents. The data gatherer imports these directly; the dashboard uses REST endpoints on the same server.
 - **One agent, one lens.** The Corner Analysis Agent doesn't know about braking physics. The Coaching Writer doesn't know about raw data. Responsibilities never bleed.
 - **Context minimisation.** Each agent receives only the channels and distance range it needs. Small context = faster, cheaper, more accurate.
 - **JSON contracts.** All inter-agent communication is typed JSON. No prose passes between agents.
@@ -69,7 +72,7 @@ After each session, PitWall:
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.10+
 - Node.js 18+
 - [Anthropic API key](https://console.anthropic.com)
 - Assetto Corsa + [Telemetrick](https://www.telemetrick.com/) (to export `.ld` files)
@@ -158,9 +161,9 @@ Track length is derived from telemetry data (maximum lap distance), so no per-tr
 
 Lap validity is determined by the `Lap Invalidated` channel if present, otherwise by a dynamic heuristic based on venue length (minimum speed floor of 30 kph). Falls back to configurable time-range (30s–120s) if venue length is unknown.
 
-### 2. MCP Server (data layer)
+### 2. Server (data layer)
 
-`server.py` exposes 6 tools over the MCP protocol (stdio transport). None of these tools do analysis:
+`server.py` defines 6 data functions decorated with FastMCP, plus REST endpoints (`/api/*`) for the dashboard. The data gatherer imports the functions directly as Python; the dashboard hits the REST API. MCP stdio transport is available but not yet consumed. None of the data functions do analysis:
 
 | Tool | Returns |
 |------|---------|
@@ -211,12 +214,12 @@ PitWall/
 │   └── pitwall.db               # SQLite (gitignored)
 ├── pitwall/
 │   ├── ingest.py                # .ld → SQLite (N-sector support)
-│   ├── server.py                # FastMCP server — 6 data tools
-│   ├── orchestrator.py          # Coordinates all agents via Claude Agent SDK
+│   ├── server.py                # 6 data functions + REST API (FastMCP)
+│   ├── orchestrator.py          # Coordinates all agents via Anthropic SDK
 │   ├── export.py                # DB → dashboard.json
 │   ├── track.py                 # Corner detection + AC track/sector parsing
 │   └── agents/
-│       ├── data_gatherer.py     # MCP-connected data fetch agent
+│       ├── data_gatherer.py     # Data fetch (direct server imports)
 │       ├── corner_analysis.py
 │       ├── braking_efficiency.py
 │       ├── balance_diagnosis.py
@@ -235,12 +238,13 @@ PitWall/
 │   ├── watch_telemetry.py       # File watcher: auto-ingest on .ld drop
 │   └── set_reference_lap.py    # CLI: mark a lap as the reference
 └── dashboard/
-    ├── public/
-    │   └── mock_session.json    # Static demo data
+    ├── public/                  # Created at runtime by export.py
+    │   └── dashboard.json       # Generated session data
     └── src/
         ├── App.jsx
         └── components/
             ├── SessionHeader.jsx
+            ├── SessionPicker.jsx
             ├── LapTimeBarChart.jsx
             ├── SpeedTraceChart.jsx
             ├── InputTraceChart.jsx
@@ -273,8 +277,8 @@ PitWall/
 |-------|------------|
 | Telemetry parsing | [ldparser](https://github.com/gotzl/ldparser) |
 | Storage | SQLite |
-| AI orchestration | [Claude Agent SDK](https://anthropic.com) |
-| Agent interface | [FastMCP](https://github.com/jlowin/fastmcp) |
+| AI orchestration | [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) |
+| Data layer / API | [FastMCP](https://github.com/jlowin/fastmcp) |
 | Dashboard | React + Vite + Recharts |
 
 ---
@@ -294,6 +298,8 @@ PitWall/
 Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan: [docs/eval-plan.md](docs/eval-plan.md)
 
 **Next up:**
+- [ ] Claude Agent SDK migration — multi-turn agents with tool use, replacing single-turn API calls
+- [ ] MCP client/server separation — agents consume data via MCP protocol, not direct imports
 - [ ] Track Strategy Agent — weight corner priority by straight length and corner sequences
 - [ ] Consistency Agent — identify high-variance corners across laps
 - [ ] Optimal braking point calculation from deceleration profiles
