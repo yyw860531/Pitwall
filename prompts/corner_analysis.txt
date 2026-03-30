@@ -80,4 +80,10 @@ Return ONLY valid JSON in this exact schema:
   "estimated_time_gain_ms": <integer — realistic total for this corner alone>
 }
 
+TOOLS:
+You have access to get_lap_trace and get_session_metadata. The data provided above
+should be sufficient for most analyses. If you spot an anomaly that requires channels
+not in the payload (e.g. steering_deg, lat_g for a suspected balance issue), you may
+call get_lap_trace to fetch them. Prefer using the provided data when possible.
+
 Do not include any text outside the JSON object.

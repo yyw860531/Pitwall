@@ -39,22 +39,24 @@ After each session, PitWall:
       ↓  exports .ld + .ldx after session
 [ingest.py]  →  [SQLite]
                     ↓
-              [server.py]         ←  6 data functions + HTTP API, zero analysis
-            ↙              ↘
-  [Data Gatherer]      [React Dashboard]
-  (direct import)      (REST /api/*)
-         ↓ SessionPayload
-  [Orchestrator Claude]    ←  coordinates, never analyses
-   ├── Corner Analysis Agent
-   ├── Braking Efficiency Agent
-   ├── Balance Diagnosis Agent
-   ├── Synthetic Lap Agent
-   └── Coaching Writer Agent
+              [server.py]              ←  6 data functions + HTTP API, zero analysis
+            ↙       ↓              ↘
+  [Data Gatherer] [Tool Registry]    [React Dashboard]
+  (direct import) (_base.py)         (REST /api/*)
+         ↓              ↓
+  [Orchestrator Agent]  ←  planner: zero tools, returns dispatch plan
+         ↓ dispatch plan (JSON)
+  [Python Dispatcher]   ←  ThreadPoolExecutor, parallel execution
+   ├── Corner Analysis Agent  ⚡ tools: get_lap_trace, get_session_metadata
+   ├── Braking Efficiency Agent  ⚡ tools: get_lap_trace
+   ├── Balance Diagnosis Agent  ⚡ tools: get_lap_trace
+   ├── Synthetic Lap Agent  ⚡ tools: get_ac_car_data, get_ac_track_line
+   └── Coaching Writer Agent  (no tools — always runs last)
          ↓
   [dashboard.json]  →  [React Dashboard]
 ```
 
-> **Note:** The data gatherer calls server functions as direct Python imports for speed. The dashboard hits REST endpoints hosted by the same FastMCP process. MCP stdio transport is available but not yet consumed by any client — see [roadmap](docs/roadmap.md) for plans to add proper MCP client/server separation.
+> **Orchestrator is a planner.** Data gathering runs first (Python, guaranteed). The orchestrator agent receives a session summary with zero tools and returns a structured dispatch plan — which corners to analyse, which analysis types each needs. Python reads the plan and dispatches sub-agents in parallel via `ThreadPoolExecutor`. Each sub-agent runs in a multi-turn tool-use loop with restricted tool visibility (Option B). The coaching writer always runs last.
 
 ### Design principles
 
@@ -62,7 +64,7 @@ After each session, PitWall:
 - **One agent, one lens.** The Corner Analysis Agent doesn't know about braking physics. The Coaching Writer doesn't know about raw data. Responsibilities never bleed.
 - **Context minimisation.** Each agent receives only the channels and distance range it needs. Small context = faster, cheaper, more accurate.
 - **JSON contracts.** All inter-agent communication is typed JSON. No prose passes between agents.
-- **Orchestrator coordinates, never analyses.** It decides which corners to focus on, which agents to spawn, and in what order. That's it.
+- **Orchestrator plans, never executes.** It decides which corners to focus on and which agents to run. Python handles the actual dispatch and parallel execution.
 - **Prompt files are the knowledge layer.** Swap coaching philosophy by editing a `.txt` file — no Python touched.
 - **Graceful degradation.** Missing `AC_ROOT`? Skip synthetic laps. Missing channel? Store NULL and continue. The report is always produced.
 

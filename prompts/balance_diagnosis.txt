@@ -46,4 +46,8 @@ Return ONLY valid JSON:
   "notes": "<1-2 sentences>"
 }
 
+TOOLS:
+You have access to get_lap_trace if you need additional channels (e.g. throttle_pct
+to check if oversteer correlates with throttle application). Prefer using the provided data.
+
 Do not include any text outside the JSON object.

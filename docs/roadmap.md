@@ -128,6 +128,8 @@ Wrong gear = wrong part of the power band = slow exit. Detectable from gear + RP
 
 **Coaching Writer** — incorporate track strategy weighting so priority ranking reflects lap time impact, not just raw delta
 
+**Orchestrator** — make Claude orchestrator opt-in. Default to deterministic `_fallback_plan()` (faster, zero API cost). Add `--smart-plan` flag to enable Claude-driven dispatch for complex sessions where heuristic selection isn't enough.
+
 ---
 
 ## Lap Optimisation Logic
@@ -135,6 +137,11 @@ Wrong gear = wrong part of the power band = slow exit. Detectable from gear + RP
 **Optimal braking point calculation**
 - Use deceleration profile (long_g) and entry speed to compute theoretical latest braking point for a target apex speed
 - Gap between theoretical and actual = true braking inefficiency
+
+**Improved per-corner time loss estimate**
+- Current `estimated_time_loss_ms` in `export.py` only uses apex min speed difference
+- Incorporate brake point delta (metres early/late) and throttle pickup delay (metres late to throttle)
+- More accurate priority ranking = better orchestrator decisions and more useful corner summary table
 
 **Exit speed → straight length weighting**
 - Weight each corner's priority by the length of the following straight
@@ -192,9 +199,9 @@ Future:   orchestrator agent → spawns corner_analysis agent with MCP tools
 
 **Migration path:**
 
-1. **Phase 1: MCP server as real transport** — expose server.py's 6 tools over MCP stdio so agents can call them as tools. data_gatherer still exists as a fallback but agents gain direct access.
-2. **Phase 2: Agent SDK for analysis agents** — convert corner_analysis, braking_efficiency, balance_diagnosis from single-turn `call_claude_json()` to Agent SDK agents with MCP tools available. Each agent gets the tool list and autonomously decides what data to fetch. data_gatherer removed.
-3. **Phase 3: Orchestrator as agent** — replace the Python orchestrator with an Agent SDK orchestrator that uses handoffs. It decides which agents to run and in what order, but can also react to intermediate results (e.g., if corner analysis reveals a systemic braking issue across multiple corners, escalate to a dedicated braking deep-dive).
+1. **Phase 1: Tool registry + agentic loop** ✅ DONE — `_base.py` now has `run_agent()` with an agentic loop (multi-turn tool-use). Tool registry maps MCP tool names to server functions. Per-agent tool allowlists (Option B: restricted visibility). Agents still receive pre-packaged data from orchestrator but can fetch additional data on demand.
+2. **Phase 2: Analysis agents on agentic loop** ✅ DONE — corner_analysis, braking_efficiency, balance_diagnosis, synthetic_lap all use `run_agent()` with their allowed tools. Coaching writer uses `run_agent()` with no tools. data_gatherer unchanged (still pre-packages data for performance).
+3. **Phase 3: Orchestrator as planner** ✅ DONE — orchestrator is a planner agent with zero tools. Data gathering runs first in Python (guaranteed). Claude receives a lightweight session summary and returns a structured dispatch plan (which corners, which analysis types). Python dispatcher reads the plan and runs sub-agents in parallel via ThreadPoolExecutor. Coaching writer always runs last (unconditional). Deterministic fallback plan if the agent fails. Future: dissolve data_gatherer, let agents fetch data via MCP tools directly.
 4. **Phase 4: Coaching writer with agent queries** — coaching writer can query individual analysis agents for clarification or request re-analysis with different parameters, producing richer reports.
 
 **Design decisions to make:**
