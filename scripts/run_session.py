@@ -87,7 +87,7 @@ def main() -> None:
 
     # -------------------------------------------- Export (data only first)
     log.info("Step 2/3: Exporting base dashboard...")
-    from pitwall.export import export, _build_corner_summary, _fetch_lap_telemetry
+    from pitwall.export import export, build_dashboard, _build_corner_summary, _fetch_lap_telemetry
     from pitwall.track import get_corners
     import sqlite3
 
@@ -104,14 +104,19 @@ def main() -> None:
     ).fetchall()
     laps = [dict(r) for r in laps_rows]
 
-    best_lap = next((l for l in laps if l["is_best"]), None)
-    ref_lap  = next((l for l in laps if l["is_reference"]), None)
-    if ref_lap is None:
-        candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
+    best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+    if best_lap is None:
+        valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+        if valid:
+            best_lap = min(valid, key=lambda l: l["lap_time_ms"])
+    ref_lap = next((l for l in laps if l["is_reference"]), None)
+    if ref_lap is None and best_lap:
+        candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
         if candidates:
             ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
 
     corner_summary = []
+    corners = []
     if best_lap and ref_lap:
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])
@@ -123,7 +128,10 @@ def main() -> None:
     conn.close()
 
     # Write data-only dashboard first (so UI shows data while agents run)
-    out_path = export(session_id, args.output)
+    out_path = args.output or (Path(__file__).parent.parent / "dashboard" / "public" / "dashboard.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard = build_dashboard(session_id)
+    out_path.write_text(json.dumps(dashboard, indent=2))
     log.info("  Dashboard written: %s", out_path)
 
     if args.no_agents:
@@ -139,10 +147,19 @@ def main() -> None:
         sys.exit(1)
 
     from pitwall.orchestrator import orchestrate
-    coaching_report = orchestrate(session_id, corner_summary)
+    coaching_report = orchestrate(session_id, corner_summary, corners)
 
-    # Write final dashboard with coaching report
-    out_path = export(session_id, args.output, coaching_report=coaching_report)
+    # Patch coaching report into existing dashboard and re-write (no full rebuild)
+    dashboard["coaching_report"] = coaching_report
+    # Also persist to DB
+    conn = sqlite3.connect(str(config.db_path))
+    conn.execute(
+        "UPDATE sessions SET coaching_report_json = ? WHERE session_id = ?",
+        (json.dumps(coaching_report), session_id),
+    )
+    conn.commit()
+    conn.close()
+    out_path.write_text(json.dumps(dashboard, indent=2))
     log.info("  Final dashboard written: %s", out_path)
 
     # Print summary

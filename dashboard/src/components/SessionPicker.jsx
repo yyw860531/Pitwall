@@ -50,6 +50,26 @@ const S = {
     fontFamily: 'monospace',
     opacity: busy ? 0.7 : 1,
   }),
+  btnSecondary: {
+    background: '#334155',
+    color: '#e2e8f0',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '4px 12px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontFamily: 'monospace',
+  },
+  btnDanger: {
+    background: '#7f1d1d',
+    color: '#fca5a5',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '4px 12px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontFamily: 'monospace',
+  },
   status: { fontSize: '11px', color: '#64748b' },
   statusGreen: { fontSize: '11px', color: '#86efac' },
 }
@@ -59,6 +79,7 @@ export default function SessionPicker({ currentSessionId, onSessionData }) {
   const [selected, setSelected]     = useState(currentSessionId || '')
   const [loadStatus, setLoadStatus] = useState('')
   const [analyseStatus, setAnalyseStatus] = useState('')
+  const [reimportStatus, setReimportStatus] = useState('')
 
   const fetchSessions = () => {
     fetch('/api/sessions')
@@ -119,6 +140,50 @@ export default function SessionPicker({ currentSessionId, onSessionData }) {
       })
   }
 
+  const handleReimport = () => {
+    if (!selected || reimportStatus) return
+    if (!window.confirm(`Re-import session ${selected}? This deletes and re-ingests from the original .ld file.`)) return
+    setReimportStatus('Re-importing…')
+    fetch(`/api/reimport/${selected}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (result.error) {
+          setReimportStatus(`Error: ${result.error}`)
+          setTimeout(() => setReimportStatus(''), 6000)
+        } else {
+          onSessionData(result)
+          setReimportStatus('Re-imported.')
+          setTimeout(() => setReimportStatus(''), 2000)
+        }
+      })
+      .catch(() => {
+        setReimportStatus('Re-import failed — check server logs.')
+        setTimeout(() => setReimportStatus(''), 5000)
+      })
+  }
+
+  const handleDelete = () => {
+    if (!selected) return
+    if (!window.confirm(`Delete session ${selected}? This cannot be undone.`)) return
+    fetch(`/api/delete/${selected}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (result.deleted) {
+          fetchSessions()
+          setSelected('')
+          setLoadStatus('Session deleted.')
+          setTimeout(() => setLoadStatus(''), 2000)
+        } else {
+          setLoadStatus('Session not found.')
+          setTimeout(() => setLoadStatus(''), 3000)
+        }
+      })
+      .catch(() => {
+        setLoadStatus('Delete failed.')
+        setTimeout(() => setLoadStatus(''), 3000)
+      })
+  }
+
   if (!sessions.length) return null
 
   return (
@@ -148,8 +213,15 @@ export default function SessionPicker({ currentSessionId, onSessionData }) {
         {analyseStatus ? '⏳ Analysing…' : '▶ Run AI Analysis'}
       </button>
 
-      {loadStatus    && <span style={S.status}>{loadStatus}</span>}
-      {analyseStatus && <span style={S.statusGreen}>{analyseStatus}</span>}
+      <button style={S.btnSecondary} onClick={handleReimport} disabled={!!reimportStatus}>
+        {reimportStatus ? '⏳ Re-importing…' : '↻ Re-import'}
+      </button>
+
+      <button style={S.btnDanger} onClick={handleDelete}>✕ Delete</button>
+
+      {loadStatus     && <span style={S.status}>{loadStatus}</span>}
+      {analyseStatus  && <span style={S.statusGreen}>{analyseStatus}</span>}
+      {reimportStatus && <span style={S.status}>{reimportStatus}</span>}
     </div>
   )
 }

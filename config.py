@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 PitWall configuration — loads from .env, exposes a typed PitWallConfig dataclass.
 Import config from here; never read os.environ directly elsewhere.

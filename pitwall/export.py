@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 export.py — queries SQLite and produces dashboard/public/dashboard.json.
 
@@ -334,7 +336,8 @@ def _build_theoretical_best_trace(
         return None
 
     sector_keys = ["s1_ms", "s2_ms", "s3_ms"]
-    n_sectors = len(sector_boundaries) + 1
+    # Cap at 3 — DB schema only stores s1/s2/s3 regardless of how many AC sectors exist
+    n_sectors = min(len(sector_boundaries) + 1, len(sector_keys))
 
     # Find laps with all required sector times
     valid = [l for l in laps if l["is_valid"]]
@@ -516,19 +519,27 @@ def build_dashboard(
         ).fetchall()
         laps = [dict(r) for r in laps_rows]
 
-        best_lap = next((l for l in laps if l["is_best"]), None)
-        ref_lap  = next((l for l in laps if l["is_reference"]), None)
-        if ref_lap is None:
-            valid_laps = [l for l in laps if l["is_valid"] and not l["is_best"]]
-            if valid_laps:
-                ref_lap = min(valid_laps, key=lambda l: l["lap_time_ms"])
+        best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+        # Fallback: fastest valid lap if .ldx best lap was invalidated
+        if best_lap is None:
+            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+            if valid:
+                best_lap = min(valid, key=lambda l: l["lap_time_ms"])
 
         if best_lap is None:
-            raise ValueError(f"No best lap found for session {session_id}")
+            raise ValueError(f"No valid laps found for session {session_id}")
+
+        ref_lap = next((l for l in laps if l["is_reference"]), None)
+        if ref_lap is None:
+            candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
+            if candidates:
+                ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
 
         ref_type = "driven" if ref_lap else "none"
 
         best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
+        if not best_samples:
+            raise ValueError(f"No telemetry data for best lap {best_lap['lap_id']}")
         ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"]) if ref_lap else best_samples
 
         valid_laps = [l for l in laps if l["is_valid"]]
@@ -542,7 +553,8 @@ def build_dashboard(
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        n_sectors = len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2
+        # Cap at 3 — DB schema only stores s1/s2/s3 regardless of how many AC sectors exist
+        n_sectors = min(len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2, 3)
         sector_keys = ["s1_ms", "s2_ms", "s3_ms"][:n_sectors]
 
         # Theoretical best = sum of best individual sector times

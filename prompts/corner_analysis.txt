@@ -14,6 +14,14 @@ When ref_trace is the AC AI optimal profile:
 Each trace is an array of samples: lap_distance_m (or distance_m), speed_kph, brake_pct,
 throttle_pct, gear. Distance values are absolute lap distances (metres), corner window only.
 
+If "car_context" is provided, use it to tailor your analysis:
+  - drivetrain (FWD/RWD/AWD): affects throttle pickup advice — AWD can get on power earlier,
+    RWD needs more patience at corner exit, FWD should trail brake deeper and straighten before throttle
+  - mass_kg: heavier cars need earlier braking and more trail brake to rotate
+  - has_aero: high-downforce cars can carry more speed through fast corners but the advantage
+    fades at low speed — adjust apex speed expectations accordingly
+  If car_context is absent, give generic advice.
+
 ANALYSIS GUIDELINES:
 
 Brake point
@@ -71,5 +79,11 @@ Return ONLY valid JSON in this exact schema:
   "key_coaching_cues": ["<specific, actionable cue 1>", "<specific, actionable cue 2>"],
   "estimated_time_gain_ms": <integer — realistic total for this corner alone>
 }
+
+TOOLS:
+You have access to get_lap_trace and get_session_metadata. The data provided above
+should be sufficient for most analyses. If you spot an anomaly that requires channels
+not in the payload (e.g. steering_deg, lat_g for a suspected balance issue), you may
+call get_lap_trace to fetch them. Prefer using the provided data when possible.
 
 Do not include any text outside the JSON object.

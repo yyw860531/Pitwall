@@ -170,6 +170,7 @@ def get_lap_trace(
     channels: list[str],
     distance_start_m: float = 0.0,
     distance_end_m: float = 9999.0,
+    stride: int = 1,
 ) -> dict:
     """
     Return raw telemetry samples for a lap within a distance range.
@@ -214,11 +215,12 @@ def get_lap_trace(
             (lap_id, distance_start_m, distance_end_m),
         ).fetchall()
 
-        samples = [dict(r) for r in rows]
+        samples = [dict(r) for r in rows[::max(1, stride)]]
         return {
             "lap_id": lap_id,
             "distance_range_m": [distance_start_m, distance_end_m],
             "sample_count": len(samples),
+            "stride": max(1, stride),
             "channels": cols,
             "samples": samples,
         }
@@ -532,6 +534,49 @@ async def api_scan(request):
     return JSONResponse({"new_sessions": len(new_sessions), "sessions": new_sessions})
 
 
+@mcp.custom_route("/api/delete/{session_id}", methods=["POST"])
+async def api_delete(request):
+    """Delete a session and all its data. Returns {"deleted": true/false}."""
+    from pitwall.ingest import delete_session
+    session_id = request.path_params.get("session_id", "")
+    try:
+        deleted = delete_session(session_id)
+        return JSONResponse({"deleted": deleted, "session_id": session_id})
+    except Exception as e:
+        log.error("Delete failed for %s: %s", session_id, e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/reimport/{session_id}", methods=["POST"])
+async def api_reimport(request):
+    """Delete a session then re-ingest from the original .ld file."""
+    from pitwall.ingest import delete_session, ingest, derive_session_id
+    from pitwall.export import build_dashboard
+    session_id = request.path_params.get("session_id", "")
+
+    # Find the .ld file in TELEMETRY_EXPORT_DIR
+    if config.telemetry_export_dir is None:
+        return JSONResponse({"error": "TELEMETRY_EXPORT_DIR not configured"}, status_code=400)
+
+    ld_file = None
+    for f in config.telemetry_export_dir.rglob("*.ld"):
+        if derive_session_id(f) == session_id:
+            ld_file = f
+            break
+
+    if ld_file is None:
+        return JSONResponse({"error": f"No .ld file found for {session_id}"}, status_code=404)
+
+    try:
+        delete_session(session_id)
+        new_sid = ingest(ld_file)
+        dashboard = build_dashboard(new_sid)
+        return JSONResponse(dashboard)
+    except Exception as e:
+        log.error("Re-import failed for %s: %s", session_id, e, exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @mcp.custom_route("/api/export/{session_id}", methods=["POST"])
 async def api_export(request):
     """Return full dashboard data for a session directly as JSON."""
@@ -541,7 +586,7 @@ async def api_export(request):
         dashboard = build_dashboard(session_id)
         return JSONResponse(dashboard)
     except Exception as e:
-        log.error("Export failed for %s: %s", session_id, e)
+        log.error("Export failed for %s: %s", session_id, e, exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -569,13 +614,18 @@ async def api_analyse(request):
         laps = [dict(r) for r in conn.execute(
             "SELECT * FROM laps WHERE session_id=? ORDER BY lap_number", (session_id,)
         ).fetchall()]
-        best_lap = next((l for l in laps if l["is_best"]), None)
-        ref_lap  = next((l for l in laps if l.get("is_reference")), None)
-        if ref_lap is None:
-            candidates = [l for l in laps if l["is_valid"] and not l["is_best"] and l["lap_time_ms"]]
+        best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+        if best_lap is None:
+            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+            if valid:
+                best_lap = min(valid, key=lambda l: l["lap_time_ms"])
+        ref_lap = next((l for l in laps if l.get("is_reference")), None)
+        if ref_lap is None and best_lap:
+            candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
             if candidates:
                 ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
         corner_summary = []
+        corners = []
         if best_lap and ref_lap and session_row:
             best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
             ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])

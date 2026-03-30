@@ -44,12 +44,32 @@ _CORE_CHANNELS    = ["speed_kph", "brake_pct", "throttle_pct", "gear"]
 _BRAKING_CHANNELS = ["speed_kph", "brake_pct", "long_g"]
 _BALANCE_CHANNELS = ["speed_kph", "steering_deg", "lat_g"]
 
+# Union of all channels any agent might need — fetched once per lap
+_ALL_CHANNELS = list({
+    "speed_kph", "brake_pct", "throttle_pct", "gear",
+    "steering_deg", "lat_g", "long_g",
+})
+
 
 def _downsample(samples: list[dict], n: int = 100) -> list[dict]:
     if len(samples) <= n:
         return samples
     step = len(samples) / n
     return [samples[int(i * step)] for i in range(n)]
+
+
+def _slice_trace(
+    full_samples: list[dict],
+    channels: list[str],
+    start_m: float,
+    end_m: float,
+) -> list[dict]:
+    """Slice a full-lap trace to a distance range and subset of channels."""
+    return [
+        {k: s[k] for k in ["lap_distance_m"] + channels if k in s}
+        for s in full_samples
+        if start_m <= s.get("lap_distance_m", 0) <= end_m
+    ]
 
 
 def _flag_braking(corner_summary: list[dict], corner_name: str) -> bool:
@@ -78,9 +98,15 @@ def _flag_balance(balance_samples: list[dict], baseline_ratio: float | None = No
     return ratio > 50 or peak_steer > 60
 
 
-def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
+def gather(
+    session_id: str,
+    corner_summary: list[dict] | None = None,
+    corners: list[dict] | None = None,
+) -> dict:
     """
     Fetch all data needed for a session analysis.
+
+    corners: pre-computed corner list from export.py. If None, detected here.
 
     Returns a SessionPayload dict with session_meta, lap IDs, and
     per-corner telemetry traces for each analysis type.
@@ -149,21 +175,47 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         log.info("Reference: %s  lap=%s", ref_type, ref_id)
 
     # ------------------------------------------------------------------
-    # Build per-corner payloads
+    # Bulk-fetch full lap traces (one DB call per unique lap)
     # ------------------------------------------------------------------
-    valid_laps = [l for l in laps if l["is_valid"]]
-    all_valid_samples = [
-        get_lap_trace(l["lap_id"], ["lat_g"])
-        for l in valid_laps
-    ]
-    all_valid_samples = [t.get("samples", []) for t in all_valid_samples if t.get("samples")]
-    corners = get_corners(meta.get("track", ""), config.ac_root, all_valid_samples)
-    # Pre-compute steering/lat_g baseline across all corners for balance detection
+    best_full = get_lap_trace(best_id, _ALL_CHANNELS)
+    best_samples = best_full.get("samples", [])
+
+    # Collect unique ref lap IDs and fetch each once
+    ref_traces: dict[str, list[dict]] = {}
+    if use_sector_ref:
+        for lid in set(best_sector_lap_ids):
+            if lid and lid != best_id:
+                t = get_lap_trace(lid, _ALL_CHANNELS)
+                ref_traces[lid] = t.get("samples", [])
+            elif lid == best_id:
+                ref_traces[lid] = best_samples
+    elif ref_id and ref_id != best_id:
+        t = get_lap_trace(ref_id, _ALL_CHANNELS)
+        ref_traces[ref_id] = t.get("samples", [])
+    elif ref_id == best_id:
+        ref_traces[best_id] = best_samples
+
+    log.info("Bulk fetch: best + %d ref lap(s)", len([k for k in ref_traces if k != best_id]))
+
+    # ------------------------------------------------------------------
+    # Corner detection (use pre-computed if available)
+    # ------------------------------------------------------------------
+    if corners is None:
+        valid_laps = [l for l in laps if l["is_valid"]]
+        all_valid_samples = [
+            get_lap_trace(l["lap_id"], ["lat_g"]).get("samples", [])
+            for l in valid_laps
+        ]
+        all_valid_samples = [s for s in all_valid_samples if s]
+        corners = get_corners(meta.get("track", ""), config.ac_root, all_valid_samples)
+
+    # ------------------------------------------------------------------
+    # Pre-compute balance baseline from cached best lap trace
+    # ------------------------------------------------------------------
     baseline_ratios = []
     for corner in corners:
         s_m, e_m = float(corner["start_m"]), float(corner["end_m"])
-        bal = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
-        bal_s = bal.get("samples", [])
+        bal_s = _slice_trace(best_samples, _BALANCE_CHANNELS, s_m, e_m)
         if bal_s:
             ps = max((abs(s.get("steering_deg") or 0) for s in bal_s), default=0)
             pl = max((abs(s.get("lat_g") or 0) for s in bal_s), default=0)
@@ -171,12 +223,15 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
                 baseline_ratios.append(ps / pl)
     baseline_ratio = float(np.median(baseline_ratios)) if baseline_ratios else None
 
+    # ------------------------------------------------------------------
+    # Build per-corner payloads (all from cached traces, zero DB calls)
+    # ------------------------------------------------------------------
     corner_payloads = []
     for corner in corners:
         name = corner["name"]
         s_m, e_m = float(corner["start_m"]), float(corner["end_m"])
 
-        best_core = get_lap_trace(best_id, _CORE_CHANNELS, s_m, e_m)
+        best_core = _slice_trace(best_samples, _CORE_CHANNELS, s_m, e_m)
 
         # Determine which sector this corner falls in
         corner_mid = (s_m + e_m) / 2
@@ -188,9 +243,11 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
 
         if use_sector_ref:
             sector_ref_id = best_sector_lap_ids[sector_idx]
-            ref_core = get_lap_trace(sector_ref_id, _CORE_CHANNELS, s_m, e_m)
+            ref_full = ref_traces.get(sector_ref_id, best_samples)
+            ref_core = _slice_trace(ref_full, _CORE_CHANNELS, s_m, e_m)
         else:
-            ref_core = get_lap_trace(ref_id, _CORE_CHANNELS, s_m, e_m)
+            ref_full = ref_traces.get(ref_id, best_samples)
+            ref_core = _slice_trace(ref_full, _CORE_CHANNELS, s_m, e_m)
 
         sector_delta = sector_deltas[sector_idx]
 
@@ -198,20 +255,19 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
             "corner_name":      name,
             "start_m":          s_m,
             "end_m":            e_m,
-            "best_trace":       _downsample(best_core.get("samples", [])),
-            "ref_trace":        _downsample(ref_core.get("samples", [])),
+            "best_trace":       _downsample(best_core),
+            "ref_trace":        _downsample(ref_core),
             "sector_delta_ms":  sector_delta,   # total sector gap — agent must stay within this
             "needs_braking":    False,
             "needs_balance":    False,
         }
 
         if _flag_braking(corner_summary or [], name):
-            bt = get_lap_trace(best_id, _BRAKING_CHANNELS, s_m, e_m)
-            payload["best_braking_trace"] = _downsample(bt.get("samples", []))
+            bt = _slice_trace(best_samples, _BRAKING_CHANNELS, s_m, e_m)
+            payload["best_braking_trace"] = _downsample(bt)
             payload["needs_braking"] = True
 
-        bal         = get_lap_trace(best_id, _BALANCE_CHANNELS, s_m, e_m)
-        bal_samples = bal.get("samples", [])
+        bal_samples = _slice_trace(best_samples, _BALANCE_CHANNELS, s_m, e_m)
         if _flag_balance(bal_samples, baseline_ratio):
             payload["best_balance_trace"] = _downsample(bal_samples)
             payload["needs_balance"] = True
@@ -232,6 +288,17 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         if "error" not in td:
             track_data = td
 
+    # Build a lightweight car context for analysis agents
+    car_context = None
+    if car_data:
+        car_context = {
+            "car_id":        car_data.get("car_id"),
+            "drivetrain":    car_data.get("drivetrain"),      # FWD / RWD / AWD
+            "mass_kg":       car_data.get("mass_kg"),
+            "has_aero":      bool(car_data.get("cl_front") or car_data.get("cl_rear")),
+            "tyre_grip_ref": car_data.get("tyre_grip_ref"),
+        }
+
     return {
         "session_id":      session_id,
         "session_meta":    meta,
@@ -239,5 +306,6 @@ def gather(session_id: str, corner_summary: list[dict] | None = None) -> dict:
         "ref_type":        ref_type,
         "corner_payloads": corner_payloads,
         "car_data":        car_data,
+        "car_context":     car_context,
         "track_data":      track_data,
     }

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 ingest.py — parse a MoTeC .ld file (via ldparser) into the PitWall SQLite database.
 
@@ -327,6 +329,23 @@ def session_exists(conn: sqlite3.Connection, session_id: str) -> bool:
     return row is not None
 
 
+def delete_session(session_id: str, db_path: Path | None = None) -> bool:
+    """Delete a session and all its laps/telemetry from the database."""
+    db_path = Path(db_path or config.db_path)
+    conn = init_db(db_path)
+    try:
+        if not session_exists(conn, session_id):
+            return False
+        conn.execute("DELETE FROM telemetry WHERE lap_id LIKE ?", (f"{session_id}_%",))
+        conn.execute("DELETE FROM laps WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+        log.info("Deleted session %s", session_id)
+        return True
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Main ingest function
 # ---------------------------------------------------------------------------
@@ -411,6 +430,14 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     # fastest_lap in .ldx is 1-indexed; store as 1-indexed
     venue_length_m = ldx.get("venue_length_m")
 
+    # Fallback: derive venue length from telemetry (max lap_distance_m)
+    if not venue_length_m and lap_distance_ch is not None:
+        venue_length_m = float(max(lap_distance_ch))
+        if venue_length_m > 0:
+            log.info("Derived venue length from telemetry: %.0fm", venue_length_m)
+        else:
+            venue_length_m = None
+
     # Try to read real sector boundaries from AC sections.ini
     import json as _json
     sector_boundaries: list[float] = []
@@ -427,6 +454,17 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     # Fallback: split at midpoint (2 sectors)
     if not sector_boundaries and venue_length_m:
         sector_boundaries = [venue_length_m / 2]
+
+    # DB schema stores only s1/s2/s3 — cap at 2 boundaries (3 sectors).
+    # AC sections.ini can give many fine-grained sectors (e.g. 12 for Spa);
+    # storing only the first 3 makes s1+s2+s3 cover just a fraction of the lap,
+    # breaking the theoretical best. Collapse to 2 evenly-spaced boundaries instead.
+    if len(sector_boundaries) > 2 and venue_length_m:
+        sector_boundaries = [
+            round(venue_length_m / 3, 1),
+            round(venue_length_m * 2 / 3, 1),
+        ]
+        log.info("Collapsed to 3 equal sectors: %s", sector_boundaries)
 
     sector_count = len(sector_boundaries) + 1
     # Keep sector_boundary_m for backwards compat (first boundary)
