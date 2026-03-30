@@ -108,11 +108,11 @@ Then edit `.env` — here's what each variable does:
 ANTHROPIC_API_KEY=your_key_here
 
 # ── Model selection ───────────────────────────────────────────────────────────
-# Sonnet for reasoning/language agents (coaching_writer, data_gatherer, synthetic_lap)
+# Sonnet for reasoning/language agents (coaching_writer, synthetic_lap)
 CLAUDE_MODEL=claude-sonnet-4-6
 
-# Haiku for calculation-only agents (corner_analysis, braking_efficiency, balance_diagnosis)
-# These agents produce structured JSON — Haiku is faster and ~20× cheaper here.
+# Haiku for structured JSON agents (corner_analysis, braking_efficiency, balance_diagnosis, orchestrator)
+# Haiku is faster and ~20× cheaper for rule-based planning and calculation tasks.
 CLAUDE_MODEL_FAST=claude-haiku-4-5
 
 # ── Assetto Corsa installation ─────────────────────────────────────────────────
@@ -157,7 +157,7 @@ This ingests the telemetry, runs the AI agent pipeline, and writes the dashboard
 
 `ingest.py` uses [ldparser](https://github.com/gotzl/ldparser) to parse MoTeC binary files exported by Telemetrick. It extracts all laps, stores sample-by-sample telemetry at 30Hz, and computes sector times using real sector boundaries from AC's `sections.ini` (supporting 2 or 3 sectors depending on the track).
 
-Channels stored: `Ground Speed`, `Throttle Pos`, `Brake Pos`, `Steering Angle`, `Gear`, `Engine RPM`, `Lap Distance`, `CG Accel Lateral`, `CG Accel Longitudinal`.
+Channels stored: `Ground Speed`, `Throttle Pos`, `Brake Pos`, `Steering Angle`, `Gear`, `Engine RPM`, `Lap Distance`, `CG Accel Lateral`, `CG Accel Longitudinal`, `Car Pos Norm`.
 
 Track length is derived from telemetry data (maximum lap distance), so no per-track configuration is needed.
 
@@ -171,7 +171,7 @@ Lap validity is determined by the `Lap Invalidated` channel if present, otherwis
 |------|---------|
 | `list_sessions()` | All ingested sessions |
 | `list_laps(session_id)` | Laps with metadata for a session |
-| `get_lap_trace(lap_id, channels, start_m, end_m)` | Raw samples for a distance range |
+| `get_lap_trace(lap_id, channels, start_m, end_m, stride)` | Raw samples for a distance range (stride for downsampling) |
 | `get_session_metadata(session_id)` | Car specs, gear ratios, fastest lap |
 | `get_ac_car_data(car_id)` | Physics parameters from AC installation (tyre grip, aero, drivetrain) |
 | `get_ac_track_line(track_id)` | Track geometry + auto-detected corner map (handles multi-layout tracks) |
@@ -217,10 +217,11 @@ PitWall/
 ├── pitwall/
 │   ├── ingest.py                # .ld → SQLite (N-sector support)
 │   ├── server.py                # 6 data functions + REST API (FastMCP)
-│   ├── orchestrator.py          # Coordinates all agents via Anthropic SDK
+│   ├── orchestrator.py          # Planner agent + parallel dispatcher
 │   ├── export.py                # DB → dashboard.json
 │   ├── track.py                 # Corner detection + AC track/sector parsing
 │   └── agents/
+│       ├── _base.py             # Agentic loop, tool registry, per-agent allowlists
 │       ├── data_gatherer.py     # Data fetch (direct server imports)
 │       ├── corner_analysis.py
 │       ├── braking_efficiency.py
@@ -252,6 +253,7 @@ PitWall/
             ├── InputTraceChart.jsx
             ├── CornerSummaryTable.jsx
             ├── CoachingPanel.jsx
+            ├── TrackMap.jsx
             └── LapCompareSelector.jsx
 ```
 
@@ -262,8 +264,8 @@ PitWall/
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | **Yes** | — | Your Anthropic API key |
-| `CLAUDE_MODEL` | No | `claude-sonnet-4-6` | Model for reasoning/language agents (coaching writer, data gatherer, synthetic lap) |
-| `CLAUDE_MODEL_FAST` | No | `claude-haiku-4-5` | Model for calculation-only agents (corner analysis, braking, balance). Haiku is ~20× cheaper for structured JSON tasks |
+| `CLAUDE_MODEL` | No | `claude-sonnet-4-6` | Model for reasoning/language agents (coaching writer, synthetic lap) |
+| `CLAUDE_MODEL_FAST` | No | `claude-haiku-4-5` | Model for structured JSON agents (corner analysis, braking, balance, orchestrator). Haiku is ~20× cheaper |
 | `AC_ROOT` | No | — | Path to your AC installation. Enables track map, real sector boundaries, synthetic reference laps |
 | `TELEMETRY_EXPORT_DIR` | No | — | Root of your Telemetrick export folder. Enables session auto-discovery |
 | `PITWALL_DB_PATH` | No | `db/pitwall.db` | SQLite database path |
@@ -300,7 +302,6 @@ PitWall/
 Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan: [docs/eval-plan.md](docs/eval-plan.md)
 
 **Next up:**
-- [ ] Claude Agent SDK migration — multi-turn agents with tool use, replacing single-turn API calls
 - [ ] MCP client/server separation — agents consume data via MCP protocol, not direct imports
 - [ ] Corner Flow Agent — coasting detection, entry/exit tradeoff, exit speed weighted by straight length
 - [ ] Gear Selection Agent — shift timing, downshift pacing per car class, power band utilisation
@@ -310,11 +311,15 @@ Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan:
 - [ ] Agent eval framework with golden session fixtures
 
 **Done:**
+- [x] Agentic loop with tool-use — multi-turn agents with restricted tool visibility per agent
+- [x] Orchestrator as planner — zero tools, returns dispatch plan, Python dispatches in parallel
+- [x] Prompt caching — 90% input token savings on repeated agent calls
 - [x] Any car, any track support — no per-track hardcoding
 - [x] Real sector boundaries from AC `sections.ini` (2 or 3 sectors)
 - [x] Corner detection from lateral-G telemetry (no AI file needed)
 - [x] Lap comparison selector with theoretical best trace
 - [x] Track map auto-detection (multi-layout tracks supported)
+- [x] Session management — re-import and delete from dashboard UI
 
 ---
 
