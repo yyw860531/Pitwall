@@ -635,7 +635,7 @@ async def api_analyse(request):
             corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
         conn.close()
 
-        coaching_report = orchestrate(session_id, corner_summary, corners)
+        coaching_report = orchestrate(session_id, corner_summary)
         return build_dashboard(session_id, coaching_report)
 
     try:
