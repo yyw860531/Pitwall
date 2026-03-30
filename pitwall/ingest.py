@@ -455,6 +455,17 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
     if not sector_boundaries and venue_length_m:
         sector_boundaries = [venue_length_m / 2]
 
+    # DB schema stores only s1/s2/s3 — cap at 2 boundaries (3 sectors).
+    # AC sections.ini can give many fine-grained sectors (e.g. 12 for Spa);
+    # storing only the first 3 makes s1+s2+s3 cover just a fraction of the lap,
+    # breaking the theoretical best. Collapse to 2 evenly-spaced boundaries instead.
+    if len(sector_boundaries) > 2 and venue_length_m:
+        sector_boundaries = [
+            round(venue_length_m / 3, 1),
+            round(venue_length_m * 2 / 3, 1),
+        ]
+        log.info("Collapsed to 3 equal sectors: %s", sector_boundaries)
+
     sector_count = len(sector_boundaries) + 1
     # Keep sector_boundary_m for backwards compat (first boundary)
     sector_boundary_m = sector_boundaries[0] if sector_boundaries else None
