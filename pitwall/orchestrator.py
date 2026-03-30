@@ -37,12 +37,17 @@ _MIN_TIME_LOSS_MS = 80
 _MAX_CORNERS      = 12
 
 
-def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
+def orchestrate(
+    session_id: str,
+    corner_summary: list[dict],
+    corners: list[dict] | None = None,
+) -> dict:
     """
     Run the full agent pipeline for a session.
 
     session_id:     e.g. '28032026-155415'
     corner_summary: from export.py _build_corner_summary(), already ranked by time loss
+    corners:        pre-computed corner list (avoids re-running get_corners)
 
     Returns a coaching_report dict ready to be written into dashboard.json.
     """
@@ -53,7 +58,7 @@ def orchestrate(session_id: str, corner_summary: list[dict]) -> dict:
     # ------------------------------------------------------------------
     log.info("[1/5] Gathering session data...")
     try:
-        payload = data_gatherer.gather(session_id, corner_summary)
+        payload = data_gatherer.gather(session_id, corner_summary, corners)
     except Exception as e:
         log.error("Data gathering failed: %s", e)
         return _error_report(f"Data gathering failed: {e}")

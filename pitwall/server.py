@@ -576,6 +576,7 @@ async def api_analyse(request):
             if candidates:
                 ref_lap = min(candidates, key=lambda l: l["lap_time_ms"])
         corner_summary = []
+        corners = []
         if best_lap and ref_lap and session_row:
             best_samples = _fetch_lap_telemetry(conn, best_lap["lap_id"])
             ref_samples  = _fetch_lap_telemetry(conn, ref_lap["lap_id"])
@@ -585,7 +586,7 @@ async def api_analyse(request):
             corner_summary = _build_corner_summary(best_samples, ref_samples, corners)
         conn.close()
 
-        coaching_report = orchestrate(session_id, corner_summary)
+        coaching_report = orchestrate(session_id, corner_summary, corners)
         return build_dashboard(session_id, coaching_report)
 
     try:
