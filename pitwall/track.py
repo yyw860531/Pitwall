@@ -83,7 +83,7 @@ def corners_from_telemetry(laps_samples: list[list[dict]]) -> list[dict]:
     n_laps = len(laps_samples)
     result = []
     for cluster in clusters:
-        if len(cluster) < max(1, n_laps * MIN_LAP_FRACTION):
+        if len(cluster) < max(2, int(n_laps * MIN_LAP_FRACTION)):
             continue
         apex_m  = float(np.median([all_apexes[i] for i in cluster]))
         start_m = float(np.median([all_regions[i][0] for i in cluster]))

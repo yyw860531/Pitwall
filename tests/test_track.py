@@ -110,18 +110,30 @@ class TestCornersFromTelemetry:
 		corners = corners_from_telemetry(laps)
 		assert len(corners) == 0
 
+	def test_corner_appears_in_two_of_six_laps_kept(self):
+		"""A corner in 2/6 laps must not be dropped by integer threshold rounding.
+
+		Old code: max(1, 6 * 0.4) = 2.4 — cluster of 2 failed (2 < 2.4).
+		New code: max(2, int(6 * 0.4)) = 2 — cluster of 2 passes (2 < 2 is False).
+		"""
+		corner = _straight_then_corner(peak_g=1.5)
+		no_corner = _straight_then_corner(peak_g=0.1)  # below threshold
+		laps = [corner, corner, no_corner, no_corner, no_corner, no_corner]
+		corners = corners_from_telemetry(laps)
+		assert len(corners) >= 1
+
 	def test_empty_input(self):
 		assert corners_from_telemetry([]) == []
 
 	def test_nearby_corners_merged(self):
-		"""Two corners within 50m gap should merge into one."""
+		"""Two corners within 20m gap should merge into one."""
 		dists = np.linspace(0, 2000, 400)
 		lat_gs = np.zeros(400)
-		# Corner A: 400-480m, Corner B: 510-590m (gap = 30m < 50m)
+		# Corner A: 400-480m, Corner B: 490-570m (gap = 10m < 20m)
 		for i, d in enumerate(dists):
 			if 400 <= d <= 480:
 				lat_gs[i] = 1.0
-			elif 510 <= d <= 590:
+			elif 490 <= d <= 570:
 				lat_gs[i] = 1.0
 		samples = _make_samples(dists.tolist(), lat_gs.tolist())
 		laps = [samples] * 5

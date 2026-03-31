@@ -572,6 +572,19 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
         )
         log.info("    Stored %d telemetry samples for lap %d", len(samples), lap_number_1indexed)
 
+    # Override is_best using actual telemetry lap times — .ldx Fastest Lap
+    # can point to the wrong lap (e.g. an out-lap with a large elapsed time).
+    # Use the fastest valid lap by computed lap_time_ms instead.
+    conn.execute("UPDATE laps SET is_best = 0 WHERE session_id = ?", (session_id,))
+    fastest_row = conn.execute(
+        "SELECT lap_id FROM laps WHERE session_id = ? AND is_valid = 1 AND lap_time_ms > 0"
+        " ORDER BY lap_time_ms ASC LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    if fastest_row:
+        conn.execute("UPDATE laps SET is_best = 1 WHERE lap_id = ?", (fastest_row[0],))
+        log.info("Best lap set to %s by telemetry lap time", fastest_row[0])
+
     conn.commit()
     conn.close()
     log.info("Session %s ingested successfully", session_id)

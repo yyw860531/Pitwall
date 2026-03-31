@@ -519,12 +519,20 @@ def build_dashboard(
         ).fetchall()
         laps = [dict(r) for r in laps_rows]
 
+        valid_laps_with_time = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+        fastest_valid = min(valid_laps_with_time, key=lambda l: l["lap_time_ms"]) if valid_laps_with_time else None
+
         best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
-        # Fallback: fastest valid lap if .ldx best lap was invalidated
-        if best_lap is None:
-            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
-            if valid:
-                best_lap = min(valid, key=lambda l: l["lap_time_ms"])
+        # Override .ldx is_best if it's not actually the fastest valid lap
+        # (e.g. .ldx Fastest Lap field is wrong or points to a slow/out lap)
+        if fastest_valid is not None and (
+            best_lap is None or best_lap["lap_time_ms"] > fastest_valid["lap_time_ms"]
+        ):
+            best_lap = fastest_valid
+
+        # Sync is_best in the laps list so the bar chart highlights the right lap
+        for l in laps:
+            l["is_best"] = (l["lap_id"] == best_lap["lap_id"]) if best_lap else False
 
         if best_lap is None:
             raise ValueError(f"No valid laps found for session {session_id}")
@@ -557,10 +565,14 @@ def build_dashboard(
         n_sectors = min(len(sector_boundaries) + 1 if sector_boundaries else session.get("sector_count", 2) or 2, 3)
         sector_keys = ["s1_ms", "s2_ms", "s3_ms"][:n_sectors]
 
-        # Theoretical best = sum of best individual sector times
+        # Theoretical best = sum of best individual sector times.
+        # Only use laps that completed ALL sectors — partial laps (e.g. out-laps
+        # that crossed boundary 1 but not 2) would give an unrealistically small
+        # minimum for that sector and corrupt the theoretical best.
+        complete_laps = [l for l in valid_laps if all(l.get(k) for k in sector_keys)]
         best_sectors = []
         for key in sector_keys:
-            best_val = min((l[key] for l in valid_laps if l.get(key)), default=None)
+            best_val = min((l[key] for l in complete_laps), default=None)
             best_sectors.append(best_val)
         theoretical_best_ms = sum(best_sectors) if all(s is not None for s in best_sectors) else None
 

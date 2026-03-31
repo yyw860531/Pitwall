@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sys
+import time
 from pathlib import Path
 
 import anthropic
@@ -225,6 +226,27 @@ def _parse_json(text: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Rate-limit retry helper
+# ---------------------------------------------------------------------------
+
+_RETRY_DELAYS = [5, 15, 30, 60]  # seconds between attempts after 429
+
+
+def _create_with_retry(client: anthropic.Anthropic, kwargs: dict):
+	"""Call client.messages.create with exponential backoff on rate limit errors."""
+	for attempt, delay in enumerate(_RETRY_DELAYS, start=1):
+		try:
+			return client.messages.create(**kwargs)
+		except anthropic.RateLimitError as e:
+			if attempt == len(_RETRY_DELAYS):
+				raise
+			log.warning("Rate limit hit (attempt %d/%d), retrying in %ds: %s",
+						attempt, len(_RETRY_DELAYS), delay, e)
+			time.sleep(delay)
+	return client.messages.create(**kwargs)  # final attempt
+
+
+# ---------------------------------------------------------------------------
 # Agentic loop -- runs Claude with optional tool-use
 # ---------------------------------------------------------------------------
 
@@ -271,7 +293,7 @@ def run_agent(
 		if tools:
 			kwargs["tools"] = tools
 
-		response = client.messages.create(**kwargs)
+		response = _create_with_retry(client, kwargs)
 
 		# Check for tool-use blocks
 		tool_blocks = [b for b in response.content if b.type == "tool_use"]
