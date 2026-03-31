@@ -114,11 +114,17 @@ class TestCornersFromTelemetry:
 		"""A corner in 2/6 laps must not be dropped by integer threshold rounding.
 
 		Old code: max(1, 6 * 0.4) = 2.4 — cluster of 2 failed (2 < 2.4).
-		New code: max(2, int(6 * 0.4)) = 2 — cluster of 2 passes (2 < 2 is False).
+		New code: max(1, int(6 * 0.4)) = 2 — cluster of 2 passes (2 < 2 is False).
 		"""
 		corner = _straight_then_corner(peak_g=1.5)
 		no_corner = _straight_then_corner(peak_g=0.1)  # below threshold
 		laps = [corner, corner, no_corner, no_corner, no_corner, no_corner]
+		corners = corners_from_telemetry(laps)
+		assert len(corners) >= 1
+
+	def test_single_lap_session_detects_corners(self):
+		"""Corner detection must work with just one valid lap."""
+		laps = [_straight_then_corner(peak_g=1.5)]
 		corners = corners_from_telemetry(laps)
 		assert len(corners) >= 1
 
