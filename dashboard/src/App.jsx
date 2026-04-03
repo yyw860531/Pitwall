@@ -6,6 +6,7 @@ import InputTraceChart from './components/InputTraceChart.jsx'
 import CornerSummaryTable from './components/CornerSummaryTable.jsx'
 import CoachingPanel from './components/CoachingPanel.jsx'
 import TrackMap from './components/TrackMap.jsx'
+import CornerDrilldown from './components/CornerDrilldown.jsx'
 import LapCompareSelector from './components/LapCompareSelector.jsx'
 import SessionPicker from './components/SessionPicker.jsx'
 
@@ -72,8 +73,9 @@ export default function App() {
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState(null)
   const [importStatus, setImportStatus] = useState('')
-  const [targetLapNum, setTargetLapNum] = useState(null)
-  const [refLapNum, setRefLapNum]     = useState(null)
+  const [targetLapNum, setTargetLapNum]     = useState(null)
+  const [refLapNum, setRefLapNum]           = useState(null)
+  const [selectedCorner, setSelectedCorner] = useState(null)
 
   const applyData = (d) => {
     setData(d)
@@ -188,7 +190,12 @@ export default function App() {
               <LapTimeBarChart laps={data.laps} session={data.session} />
             </div>
             <div style={S.panel}>
-              <TrackMap trackMapUrl={data.session.track_map_url} />
+              <TrackMap
+                trackPath={data.track_path}
+                cornerSummary={data.corner_summary}
+                selectedCorner={selectedCorner}
+                onCornerSelect={setSelectedCorner}
+              />
             </div>
           </div>
 
@@ -206,8 +213,23 @@ export default function App() {
             />
           </div>
           <div style={S.panel}>
-            <CornerSummaryTable cornerSummary={data.corner_summary} />
+            <CornerSummaryTable
+              cornerSummary={data.corner_summary}
+              selectedCorner={selectedCorner}
+              onCornerSelect={setSelectedCorner}
+            />
           </div>
+          {selectedCorner && (
+            <div style={S.panel}>
+              <CornerDrilldown
+                sessionId={data.session.session_id}
+                cornerName={selectedCorner}
+                cornerSummary={data.corner_summary}
+                onClose={() => setSelectedCorner(null)}
+                onNavigate={setSelectedCorner}
+              />
+            </div>
+          )}
         </div>
 
         <div style={S.right}>

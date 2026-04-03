@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
     slip_fr         REAL,
     slip_rl         REAL,
     slip_rr         REAL,
+    x_m             REAL,
+    z_m             REAL,
     FOREIGN KEY (lap_id) REFERENCES laps(lap_id)
 );
 
@@ -317,6 +319,12 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE sessions ADD COLUMN venue_length_m REAL")
     if "sector_boundaries_json" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN sector_boundaries_json TEXT")
+    # Migrations for telemetry table
+    tcols = {row[1] for row in conn.execute("PRAGMA table_info(telemetry)").fetchall()}
+    if "x_m" not in tcols:
+        conn.execute("ALTER TABLE telemetry ADD COLUMN x_m REAL")
+    if "z_m" not in tcols:
+        conn.execute("ALTER TABLE telemetry ADD COLUMN z_m REAL")
     conn.commit()
     log.info("Database ready: %s", db_path)
     return conn
@@ -419,6 +427,10 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
 
     # Car Pos Norm is 10Hz
     car_pos_ch = align_to_30hz_from_channel(ld, "Car Pos Norm", n_30hz)
+
+    # World position (X/Z horizontal plane) at 30Hz
+    coord_x_ch = get_channel(ld, "Car Coord X")
+    coord_z_ch = get_channel(ld, "Car Coord Z")
 
     # Tire Slip Angles at 30Hz (same rate — no alignment needed)
     slip_fl_ch = get_channel(ld, "Tire Slip Angle FL")
@@ -560,14 +572,17 @@ def ingest(ld_path: Path, db_path: Path | None = None) -> str:
                 _val(slip_fr_ch, global_idx),
                 _val(slip_rl_ch, global_idx),
                 _val(slip_rr_ch, global_idx),
+                _val(coord_x_ch, global_idx),
+                _val(coord_z_ch, global_idx),
             ))
 
         conn.executemany(
             """INSERT INTO telemetry
                (lap_id, sample_index, lap_distance_m, car_pos_norm,
                 speed_kph, throttle_pct, brake_pct, steering_deg, gear, rpm,
-                lat_g, long_g, slip_fl, slip_fr, slip_rl, slip_rr)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                lat_g, long_g, slip_fl, slip_fr, slip_rl, slip_rr,
+                x_m, z_m)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             samples
         )
         log.info("    Stored %d telemetry samples for lap %d", len(samples), lap_number_1indexed)
