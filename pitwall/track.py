@@ -112,6 +112,13 @@ def corners_from_telemetry(laps_samples: list[list[dict]]) -> list[dict]:
         else:
             merged.append(c)
 
+    # Remove corners narrower than MIN_WIDTH_M — these are sub-detections within
+    # a chicane complex (e.g. the narrow squeeze between T12a/T12b at Spa) that
+    # survive the gap-merge because they sit far enough apart, yet are too short
+    # to represent a real standalone corner.
+    MIN_WIDTH_M = 50.0
+    merged = [c for c in merged if c["end_m"] - c["start_m"] >= MIN_WIDTH_M]
+
     for n, c in enumerate(merged, start=1):
         c["name"]    = f"T{n}"
         c["display"] = f"T{n}"
