@@ -86,13 +86,28 @@ def _fetch_lap_telemetry(conn: sqlite3.Connection, lap_id: str) -> list[dict]:
     """Return all telemetry samples for a lap, ordered by lap_distance_m."""
     rows = conn.execute(
         """SELECT lap_distance_m, speed_kph, throttle_pct, brake_pct,
-                  steering_deg, gear, rpm, lat_g, long_g
+                  steering_deg, gear, rpm, lat_g, long_g, x_m, z_m
            FROM telemetry
            WHERE lap_id = ?
            ORDER BY lap_distance_m""",
         (lap_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+TRACK_PATH_POINTS = 300  # max points for the track outline SVG polyline
+
+
+def _build_track_path(samples: list[dict]) -> list[dict] | None:
+    """
+    Downsample one lap's X/Z world coords to at most TRACK_PATH_POINTS points.
+    Returns None if X/Z data is not available for this session.
+    """
+    pts = [(s["x_m"], s["z_m"]) for s in samples if s.get("x_m") is not None and s.get("z_m") is not None]
+    if not pts:
+        return None
+    step = max(1, len(pts) // TRACK_PATH_POINTS)
+    return [{"x": round(x, 1), "z": round(z, 1)} for x, z in pts[::step]]
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +262,25 @@ def _build_corner_summary(
         speed_diff = ref_m["min_speed_kph"] - best_m["min_speed_kph"]
         est_time_loss_ms = max(0, int(round(speed_diff / max(best_m["min_speed_kph"], 1) * corner_dur_s * 1000)))
 
+        # World position at apex: find best-lap sample nearest to apex_m
+        apex_x, apex_z = None, None
+        apex_candidates = [
+            s for s in best_samples
+            if s.get("x_m") is not None and abs(s["lap_distance_m"] - corner["apex_m"]) < 20
+        ]
+        if apex_candidates:
+            closest = min(apex_candidates, key=lambda s: abs(s["lap_distance_m"] - corner["apex_m"]))
+            apex_x = round(closest["x_m"], 1)
+            apex_z = round(closest["z_m"], 1)
+
         results.append({
             "corner_name":    corner["name"],
             "corner_display": corner["display"],
             "start_m":        corner["start_m"],
             "apex_m":         corner["apex_m"],
             "end_m":          corner["end_m"],
+            "apex_x":         apex_x,
+            "apex_z":         apex_z,
             "best_lap":       best_m,
             "reference_lap":  ref_m,
             "delta": {
@@ -614,6 +642,9 @@ def build_dashboard(
         if track_length_m is None:
             track_length_m = 0.0
 
+        # --- Track path from best lap world coords (X/Z) ---
+        track_path = _build_track_path(best_samples) if best_samples else None
+
         # --- Track map as base64 data URI (works for both API and file paths) ---
         track_map_url = None
         if config.ac_root is not None:
@@ -666,6 +697,7 @@ def build_dashboard(
                 }
                 for l in laps
             ],
+            "track_path":             track_path,
             "speed_trace":            speed_trace,
             "input_trace":            input_trace,
             "corner_summary":         corner_summary,

@@ -577,6 +577,122 @@ async def api_reimport(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@mcp.custom_route("/api/corner_trace/{session_id}/{corner_name}", methods=["GET"])
+async def api_corner_trace(request):
+    """
+    Return windowed telemetry traces and racing lines for a single corner.
+
+    Response shape:
+      {
+        "corner": { name, display, start_m, apex_m, end_m },
+        "best_lap":  { lap_number, samples: [{distance_m, speed_kph, throttle_pct, brake_pct, x_m, z_m}] },
+        "ref_lap":   { lap_number, samples: [...] },
+        "coaching_tip": str | null
+      }
+
+    Distance values are normalised so the corner window starts at 0m.
+    """
+    from pitwall.export import _fetch_lap_telemetry, _build_corner_summary
+    from pitwall.track import get_corners
+    import sqlite3 as _sqlite3
+
+    session_id  = request.path_params.get("session_id", "")
+    corner_name = request.path_params.get("corner_name", "")
+
+    conn = _sqlite3.connect(str(config.db_path))
+    conn.row_factory = _sqlite3.Row
+    try:
+        session_row = conn.execute(
+            "SELECT * FROM sessions WHERE session_id=?", (session_id,)
+        ).fetchone()
+        if session_row is None:
+            return JSONResponse({"error": "session not found"}, status_code=404)
+
+        laps = [dict(r) for r in conn.execute(
+            "SELECT * FROM laps WHERE session_id=? ORDER BY lap_number", (session_id,)
+        ).fetchall()]
+
+        best_lap = next((l for l in laps if l["is_best"] and l["is_valid"]), None)
+        if best_lap is None:
+            valid = [l for l in laps if l["is_valid"] and l["lap_time_ms"]]
+            best_lap = min(valid, key=lambda l: l["lap_time_ms"]) if valid else None
+        if best_lap is None:
+            return JSONResponse({"error": "no valid laps"}, status_code=404)
+
+        ref_lap = next((l for l in laps if l.get("is_reference") and l["lap_id"] != best_lap["lap_id"]), None)
+        if ref_lap is None:
+            candidates = [l for l in laps if l["is_valid"] and l["lap_id"] != best_lap["lap_id"] and l["lap_time_ms"]]
+            ref_lap = min(candidates, key=lambda l: l["lap_time_ms"]) if candidates else None
+
+        # Detect corners to find the requested one
+        valid_laps = [l for l in laps if l["is_valid"]]
+        all_samples = [_fetch_lap_telemetry(conn, l["lap_id"]) for l in valid_laps]
+        corners = get_corners(session_row["track"], config.ac_root, all_samples)
+        corner = next((c for c in corners if c["name"] == corner_name), None)
+        if corner is None:
+            return JSONResponse({"error": f"corner '{corner_name}' not found"}, status_code=404)
+
+        start_m = corner["start_m"]
+        end_m   = corner["end_m"]
+
+        def _window(lap_id: str) -> list[dict]:
+            samples = _fetch_lap_telemetry(conn, lap_id)
+            seg = [s for s in samples if start_m <= s["lap_distance_m"] <= end_m]
+            return [
+                {
+                    "distance_m":   round(s["lap_distance_m"] - start_m, 1),
+                    "speed_kph":    round(s["speed_kph"] or 0, 1),
+                    "throttle_pct": round(s["throttle_pct"] or 0, 1),
+                    "brake_pct":    round(s["brake_pct"] or 0, 1),
+                    "x_m":          round(s["x_m"], 1) if s.get("x_m") is not None else None,
+                    "z_m":          round(s["z_m"], 1) if s.get("z_m") is not None else None,
+                }
+                for s in seg
+            ]
+
+        best_samples_w = _window(best_lap["lap_id"])
+        ref_samples_w  = _window(ref_lap["lap_id"]) if ref_lap else []
+
+        # Pull per-corner coaching tip from the saved report
+        coaching_tip = None
+        report_json = session_row["coaching_report_json"]
+        if report_json:
+            try:
+                report = json.loads(report_json)
+                for agent_key in ("corner_analysis", "braking", "traction"):
+                    agent_data = report.get(agent_key, {})
+                    corners_data = agent_data.get("corners", [])
+                    for c in corners_data:
+                        if c.get("corner") == corner_name or c.get("name") == corner_name:
+                            coaching_tip = c.get("insight") or c.get("tip") or c.get("summary")
+                            break
+                    if coaching_tip:
+                        break
+            except Exception:
+                pass
+
+        return JSONResponse({
+            "corner": {
+                "name":    corner["name"],
+                "display": corner["display"],
+                "start_m": start_m,
+                "apex_m":  corner["apex_m"],
+                "end_m":   end_m,
+            },
+            "best_lap": {
+                "lap_number": best_lap["lap_number"],
+                "samples":    best_samples_w,
+            },
+            "ref_lap": {
+                "lap_number": ref_lap["lap_number"] if ref_lap else None,
+                "samples":    ref_samples_w,
+            },
+            "coaching_tip": coaching_tip,
+        })
+    finally:
+        conn.close()
+
+
 @mcp.custom_route("/api/export/{session_id}", methods=["POST"])
 async def api_export(request):
     """Return full dashboard data for a session directly as JSON."""

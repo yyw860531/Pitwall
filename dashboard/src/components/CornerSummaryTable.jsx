@@ -54,7 +54,7 @@ const priorityBadge = (priority) => ({
   fontWeight: 700,
 })
 
-export default function CornerSummaryTable({ cornerSummary }) {
+export default function CornerSummaryTable({ cornerSummary, selectedCorner, onCornerSelect }) {
   return (
     <div>
       <div style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
@@ -71,12 +71,22 @@ export default function CornerSummaryTable({ cornerSummary }) {
           </tr>
         </thead>
         <tbody>
-          {cornerSummary.map(corner => (
-            <tr key={corner.corner_name} style={{ background: corner.priority <= 2 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+          {cornerSummary.map(corner => {
+            const isSelected = corner.corner_name === selectedCorner
+            return (
+            <tr
+              key={corner.corner_name}
+              onClick={() => onCornerSelect?.(isSelected ? null : corner.corner_name)}
+              style={{
+                background: isSelected ? 'rgba(249,115,22,0.08)' : corner.priority <= 2 ? 'rgba(255,255,255,0.02)' : 'transparent',
+                cursor: onCornerSelect ? 'pointer' : 'default',
+                outline: isSelected ? '1px solid rgba(249,115,22,0.3)' : 'none',
+              }}
+            >
               <td style={tdStyle}>
                 <span style={priorityBadge(corner.priority)}>P{corner.priority}</span>
                 {' '}
-                <span style={{ color: '#cbd5e1' }}>{corner.corner_display}</span>
+                <span style={{ color: isSelected ? '#fed7aa' : '#cbd5e1' }}>{corner.corner_display}</span>
               </td>
               <DeltaCell
                 value={corner.delta.min_speed_kph}
@@ -95,7 +105,8 @@ export default function CornerSummaryTable({ cornerSummary }) {
               />
               <TimeLossCell value={corner.delta.estimated_time_loss_ms} />
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
       <div style={{ marginTop: 8, fontSize: '10px', color: '#334155' }}>
