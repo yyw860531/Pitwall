@@ -157,7 +157,7 @@ This ingests the telemetry, runs the AI agent pipeline, and writes the dashboard
 
 `ingest.py` uses [ldparser](https://github.com/gotzl/ldparser) to parse MoTeC binary files exported by Telemetrick. It extracts all laps, stores sample-by-sample telemetry at 30Hz, and computes sector times using real sector boundaries from AC's `sections.ini` (supporting 2 or 3 sectors depending on the track).
 
-Channels stored: `Ground Speed`, `Throttle Pos`, `Brake Pos`, `Steering Angle`, `Gear`, `Engine RPM`, `Lap Distance`, `CG Accel Lateral`, `CG Accel Longitudinal`, `Car Pos Norm`.
+Channels stored: `Ground Speed`, `Throttle Pos`, `Brake Pos`, `Steering Angle`, `Gear`, `Engine RPM`, `Lap Distance`, `CG Accel Lateral`, `CG Accel Longitudinal`, `Car Pos Norm`, `Car Coord X`, `Car Coord Y` (world position — AC's horizontal plane, stored as `x_m`/`z_m`).
 
 Track length is derived from telemetry data (maximum lap distance), so no per-track configuration is needed.
 
@@ -175,6 +175,16 @@ Lap validity is determined by the `Lap Invalidated` channel if present, otherwis
 | `get_session_metadata(session_id)` | Car specs, gear ratios, fastest lap |
 | `get_ac_car_data(car_id)` | Physics parameters from AC installation (tyre grip, aero, drivetrain) |
 | `get_ac_track_line(track_id)` | Track geometry + auto-detected corner map (handles multi-layout tracks) |
+
+REST endpoints served by the same server for the dashboard:
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/sessions` | All ingested sessions |
+| `GET /api/session/{session_id}` | Full dashboard payload (laps, corners, track path) |
+| `GET /api/corner_trace/{session_id}/{corner_name}` | Windowed speed/throttle/brake/XZ samples for best + ref lap, plus AI coaching tip |
+| `POST /api/import` | Ingest a new `.ld` file |
+| `DELETE /api/session/{session_id}` | Remove a session |
 
 ### 3. Agent pipeline
 
@@ -196,8 +206,9 @@ Features:
 - **Lap comparison selector** — compare any two laps head-to-head, or compare against the theoretical best (stitched from best sector times)
 - **Speed trace overlay** — best lap vs. reference with aligned X-axis
 - **Throttle / brake trace** — input overlay, shows early braking and late throttle
-- **Track map** — auto-detected from AC installation (supports multi-layout tracks like Red Bull Ring)
-- **Corner summary table** — delta per corner, colour-coded, sorted by time loss
+- **Interactive track map** — SVG circuit outline built from telemetry world coordinates (`Car Coord X`/`Y`), numbered corner bubbles showing time delta vs reference, click to select a corner
+- **Corner summary table** — delta per corner, colour-coded, sorted by time loss; click any row to drill down
+- **Corner drilldown panel** — zoomed speed/throttle/brake traces for the selected corner, racing line overlay (best lap vs reference), cumulative Δ-time chart, AI coaching tip
 - **Coaching panel** — full report from Claude, priority corners highlighted
 
 ---
@@ -252,8 +263,9 @@ PitWall/
             ├── SpeedTraceChart.jsx
             ├── InputTraceChart.jsx
             ├── CornerSummaryTable.jsx
+            ├── CornerDrilldown.jsx      # Zoomed corner traces + racing line overlay
             ├── CoachingPanel.jsx
-            ├── TrackMap.jsx
+            ├── TrackMap.jsx             # SVG track map from telemetry coordinates
             └── LapCompareSelector.jsx
 ```
 
@@ -318,7 +330,8 @@ Full roadmap with design notes: [docs/roadmap.md](docs/roadmap.md) · Eval plan:
 - [x] Real sector boundaries from AC `sections.ini` (2 or 3 sectors)
 - [x] Corner detection from lateral-G telemetry (no AI file needed)
 - [x] Lap comparison selector with theoretical best trace
-- [x] Track map auto-detection (multi-layout tracks supported)
+- [x] Interactive SVG track map — built from telemetry world coordinates, no external assets needed
+- [x] Corner drilldown — zoomed traces, racing line overlay, cumulative Δ-time, AI coaching tip per corner
 - [x] Session management — re-import and delete from dashboard UI
 
 ---
